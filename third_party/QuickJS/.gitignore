@@ -1,0 +1,11 @@
+bin
+build
+CMakeCache.*
+CMakeFiles
+cmake-build-*
+cmake_install.cmake
+compile_commands.json
+lib
+__tests__/test262
+__tests__/test262_report.txt
+*.map

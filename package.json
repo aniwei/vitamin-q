@@ -1,0 +1,17 @@
+{
+  "name": "vitamin-q",
+  "version": "0.1.0",
+  "description": "TypeScript to QuickJS Bytecode Compiler",
+  "main": "dist/compiler.js",
+  "scripts": {
+    "gen:env": "npm run gen:env && jest"
+  },
+  "devDependencies": {
+    "@types/node": "^20.19.13",
+    "typescript": "^5.9.2",
+     "tsx": "^4.20.5"
+  },
+  "dependencies": {
+   
+  }
+}

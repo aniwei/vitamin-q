@@ -1,0 +1,181 @@
+#include "quickjs-debugger.h"
+
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <unistd.h>
+#include <string.h>
+#include <netdb.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <assert.h>
+#include <poll.h>
+#include <arpa/inet.h>
+#include "curl/curl.h"
+#include "curl/multi.h"
+
+struct js_transport_data {
+  CURL* curl_;
+  CURLM* multi_handle_;
+} js_transport_data;
+
+static size_t js_transport_read(void *udata, char *buffer, size_t length) {
+    struct js_transport_data* data = (struct js_transport_data *)udata;
+    if (data == NULL || data->curl_ == NULL) {
+        return -1;
+    }
+
+    if (length == 0)
+        return -2;
+
+    if (buffer == NULL)
+        return -3;
+
+    // Receive a message
+    size_t recvlen = 0;
+    const struct curl_ws_frame *meta = NULL;
+    CURLcode res = curl_ws_recv(data->curl_, buffer, sizeof(buffer), &recvlen, &meta);
+    if (res != CURLE_OK) {
+        return -4;
+    }
+
+    if (recvlen <= 0)
+        return -5;
+
+    if (recvlen > length)
+        return -6;
+
+    return recvlen;
+}
+
+static size_t js_transport_write(void *udata, const char *buffer, size_t length) {
+    struct js_transport_data* data = (struct js_transport_data *)udata;
+    if (data == NULL || data->curl_ == NULL) {
+        return -1;
+    }
+
+  size_t sent1 = 0;
+  CURLcode res1 = curl_ws_send(data->curl_, "hello1", strlen("hello1"), &sent1, 0, CURLWS_BINARY);
+  if(res1 != CURLE_OK) {
+    const char* error = curl_easy_strerror(res1);
+  }
+
+    if (length == 0)
+        return -2;
+
+    if (buffer == NULL)
+        return -3;
+
+    size_t sent = 0;
+    CURLcode res = curl_ws_send(data->curl_, buffer, length, &sent, 0, CURLWS_BINARY);
+    if (res != CURLE_OK) {
+        return -4;
+    }
+
+    if (sent <= 0 || sent > (ssize_t) length)
+        return -4;
+
+    return sent;
+}
+
+static size_t js_transport_peek(void *udata) {
+    struct js_transport_data* data = (struct js_transport_data *)udata;
+    if (data == NULL || data->curl_ == NULL) {
+        return -1;
+    }
+
+    int still_running = 0;
+    int numfds = 0;
+    struct curl_waitfd extra_fds[1];  // 假设我们只需要监视一个额外的文件描述符
+    curl_easy_getinfo(data->curl_, CURLINFO_ACTIVESOCKET, &extra_fds[0].fd);
+    extra_fds[0].events = CURL_POLL_IN;  // 监视读取事件
+
+    CURLMcode mc = curl_multi_perform(data->multi_handle_, &still_running);
+    if (mc == CURLM_OK) {
+        mc = curl_multi_poll(data->multi_handle_, extra_fds, 1, 0, &numfds);
+    }
+
+    if (mc != CURLM_OK) {
+        return -2;
+    }
+
+    if (numfds == 0) {
+        return 0;
+    }
+
+    return 1;
+}
+
+static void js_transport_close(JSRuntime* rt, void *udata) {
+    struct js_transport_data* data = (struct js_transport_data *)udata;
+    if (data == NULL || data->curl_ == NULL)
+        return;
+    curl_multi_remove_handle(data->multi_handle_, data->curl_);
+    curl_easy_cleanup(data->curl_);
+    data->curl_ = NULL;
+    curl_multi_cleanup(data->multi_handle_);
+    data->multi_handle_ = NULL;
+    free(udata);
+    curl_global_cleanup();
+}
+
+void js_debugger_connect(JSContext *ctx, const char *address) {
+    curl_global_init(CURL_GLOBAL_ALL);
+    CURL* curl = curl_easy_init();
+    assert(curl !=NULL);
+
+    curl_easy_setopt(curl, CURLOPT_URL, address);
+    curl_easy_setopt(curl, CURLOPT_CONNECT_ONLY, 2L);
+    curl_easy_setopt(curl, CURLOPT_VERBOSE, 1L);
+//    curl_easy_setopt(curl, CURLOPT_WS_OPTIONS, (long)CURLWS_RAW_MODE);
+//    CURLcode res = curl_easy_perform(curl);
+  CURLcode res = CURLE_OK;
+  CURLM* multi_handle = curl_multi_init();
+  CURLMcode mCode = curl_multi_add_handle(multi_handle, curl);
+  int still_running = 0;
+//  mCode = curl_multi_perform(multi_handle, &still_running);
+
+  do {
+    CURLMcode mc = curl_multi_perform(multi_handle, &still_running);
+
+    if(still_running)
+      /* wait for activity, timeout or "nothing" */
+      mc = curl_multi_poll(multi_handle, NULL, 0, 1000, NULL);
+
+    if(mc)
+      break;
+
+  } while(still_running);
+
+
+    assert(res == CURLE_OK);
+
+    size_t sent = 0;
+    res = curl_ws_send(curl, "hello", strlen("hello"), &sent, 0, CURLWS_BINARY);
+    if(res != CURLE_OK) {
+      const char* error = curl_easy_strerror(res);
+    }
+
+    size_t rlen;
+    const struct curl_ws_frame *meta;
+    char buffer[256];
+    CURLcode result = curl_ws_recv(curl, buffer, sizeof(buffer), &rlen, &meta);
+
+    struct js_transport_data *data = (struct js_transport_data *)malloc(sizeof(struct js_transport_data));
+    memset(data, 0, sizeof(js_transport_data));
+//    CURLM* multi_handle = curl_multi_init();
+//  CURLMcode mCode = curl_multi_add_handle(multi_handle, curl);
+    data->curl_ = curl;
+    data->multi_handle_ = multi_handle;
+
+  sent = 0;
+  res = curl_ws_send(curl, "hello123", strlen("hello123"), &sent, 0, CURLWS_BINARY);
+
+  result = curl_ws_recv(curl, buffer, sizeof(buffer), &rlen, &meta);
+
+    js_debugger_attach(ctx, js_transport_read, js_transport_write, js_transport_peek, js_transport_close, data);
+}
+
+void js_debugger_wait_connection(JSContext *ctx, const char* address) {
+    // not supported
+    assert(1);
+}
