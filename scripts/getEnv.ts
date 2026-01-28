@@ -33,6 +33,7 @@ async function main() {
   lines.push(`// 生成时间: ${new Date().toISOString()}`)
   lines.push(``)
 
+
   // Constants
   lines.push(`export const GLOBAL_VAR_OFFSET = ${globalVarOffset}`)
   lines.push(`export const ARGUMENT_VAR_OFFSET = ${argumentVarOffset}`)
@@ -83,6 +84,7 @@ async function main() {
   lines.push(`// third_party/QuickJS/include/QuickJS/quickjs.h:237`)
   lines.push(`export const JS_ATOM_NULL = ${0}`)
   lines.push(``)
+
 
   // QuickJS 编译器实现细节常量（来自 QuickJS parser.c；用于 TS 侧对齐与消除魔数）
   lines.push(`// QuickJS 编译器实现细节常量（来自 QuickJS parser.c；用于 TS 侧对齐与消除魔数）`)
@@ -355,6 +357,7 @@ async function main() {
   lines.push(`  stackSizeMax: ${stackSizeMax},`)
   lines.push(`} as const`)
   lines.push(``)
+
 
   writeFileSync(envPath, lines.join('\n'))
   console.log(`Generated ${envPath}`)

@@ -4,7 +4,8 @@
   "description": "TypeScript to QuickJS Bytecode Compiler",
   "main": "dist/compiler.js",
   "scripts": {
-    "gen:env": "npm run gen:env && jest"
+    "gen:env": "tsx scripts/getEnv.ts",
+    "generate:types": "tsx scripts/getEnv.ts"
   },
   "devDependencies": {
     "@types/node": "^20.19.13",
