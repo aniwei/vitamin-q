@@ -41,6 +41,17 @@ interface WasmInstance {
   getBytecodeTags: () => BytecodeTag[]
   getCompileFlags: () => number
   getCompileEnums: () => Record<string, number>
+  getParseFunctionEnums: () => Array<{ id: number; name: string }>
+  getParseExportEnums: () => Array<{ id: number; name: string }>
+  getVarKindEnums: () => Array<{ id: number; name: string }>
+  getBlockEnvLayout: () => Array<{ name: string; offset: number; size: number }>
+  getFunctionBytecodeLayout: () => Array<{ name: string; offset: number; size: number }>
+  getModuleDefLayout: () => Array<{ name: string; offset: number; size: number }>
+  getFunctionDefLayout: () => Array<{ name: string; offset: number; size: number }>
+  getVarDefLayout: () => Array<{ name: string; offset: number; size: number }>
+  getVarScopeLayout: () => Array<{ name: string; offset: number; size: number }>
+  getClosureVarLayout: () => Array<{ name: string; offset: number; size: number }>
+  getGlobalVarLayout: () => Array<{ name: string; offset: number; size: number }>
 }
 
 export class QuickJSLib {
@@ -412,6 +423,127 @@ export class QuickJSLib {
       tags[t.name] = t.id
     }
     return tags
+  }
+
+  static async getParseFunctionEnums() {
+    const WasmInstance = await QuickJSLib.getWasmInstance()
+    const vec = WasmInstance.QuickJSBinding.getParseFunctionEnums()
+    const map: Record<string, number> = {}
+    for (let i = 0; i < vec.size(); i++) {
+      const item = vec.get(i)
+      map[item.name] = item.id
+    }
+    return map
+  }
+
+  static async getParseExportEnums() {
+    const WasmInstance = await QuickJSLib.getWasmInstance()
+    const vec = WasmInstance.QuickJSBinding.getParseExportEnums()
+    const map: Record<string, number> = {}
+    for (let i = 0; i < vec.size(); i++) {
+      const item = vec.get(i)
+      map[item.name] = item.id
+    }
+    return map
+  }
+
+  static async getVarKindEnums() {
+    const WasmInstance = await QuickJSLib.getWasmInstance()
+    const vec = WasmInstance.QuickJSBinding.getVarKindEnums()
+    const map: Record<string, number> = {}
+    for (let i = 0; i < vec.size(); i++) {
+      const item = vec.get(i)
+      map[item.name] = item.id
+    }
+    return map
+  }
+
+  static async getBlockEnvLayout() {
+    const WasmInstance = await QuickJSLib.getWasmInstance()
+    const vec = WasmInstance.QuickJSBinding.getBlockEnvLayout()
+    const list: Array<{ name: string; offset: number; size: number }> = []
+    for (let i = 0; i < vec.size(); i++) {
+      const item = vec.get(i)
+      list.push({ name: item.name, offset: item.offset, size: item.size })
+    }
+    return list
+  }
+
+  static async getFunctionBytecodeLayout() {
+    const WasmInstance = await QuickJSLib.getWasmInstance()
+    const vec = WasmInstance.QuickJSBinding.getFunctionBytecodeLayout()
+    const list: Array<{ name: string; offset: number; size: number }> = []
+    for (let i = 0; i < vec.size(); i++) {
+      const item = vec.get(i)
+      list.push({ name: item.name, offset: item.offset, size: item.size })
+    }
+    return list
+  }
+
+  static async getModuleDefLayout() {
+    const WasmInstance = await QuickJSLib.getWasmInstance()
+    const vec = WasmInstance.QuickJSBinding.getModuleDefLayout()
+    const list: Array<{ name: string; offset: number; size: number }> = []
+    for (let i = 0; i < vec.size(); i++) {
+      const item = vec.get(i)
+      list.push({ name: item.name, offset: item.offset, size: item.size })
+    }
+    return list
+  }
+
+  static async getFunctionDefLayout() {
+    const WasmInstance = await QuickJSLib.getWasmInstance()
+    const vec = WasmInstance.QuickJSBinding.getFunctionDefLayout()
+    const list: Array<{ name: string; offset: number; size: number }> = []
+    for (let i = 0; i < vec.size(); i++) {
+      const item = vec.get(i)
+      list.push({ name: item.name, offset: item.offset, size: item.size })
+    }
+    return list
+  }
+
+  static async getVarDefLayout() {
+    const WasmInstance = await QuickJSLib.getWasmInstance()
+    const vec = WasmInstance.QuickJSBinding.getVarDefLayout()
+    const list: Array<{ name: string; offset: number; size: number }> = []
+    for (let i = 0; i < vec.size(); i++) {
+      const item = vec.get(i)
+      list.push({ name: item.name, offset: item.offset, size: item.size })
+    }
+    return list
+  }
+
+  static async getVarScopeLayout() {
+    const WasmInstance = await QuickJSLib.getWasmInstance()
+    const vec = WasmInstance.QuickJSBinding.getVarScopeLayout()
+    const list: Array<{ name: string; offset: number; size: number }> = []
+    for (let i = 0; i < vec.size(); i++) {
+      const item = vec.get(i)
+      list.push({ name: item.name, offset: item.offset, size: item.size })
+    }
+    return list
+  }
+
+  static async getClosureVarLayout() {
+    const WasmInstance = await QuickJSLib.getWasmInstance()
+    const vec = WasmInstance.QuickJSBinding.getClosureVarLayout()
+    const list: Array<{ name: string; offset: number; size: number }> = []
+    for (let i = 0; i < vec.size(); i++) {
+      const item = vec.get(i)
+      list.push({ name: item.name, offset: item.offset, size: item.size })
+    }
+    return list
+  }
+
+  static async getGlobalVarLayout() {
+    const WasmInstance = await QuickJSLib.getWasmInstance()
+    const vec = WasmInstance.QuickJSBinding.getGlobalVarLayout()
+    const list: Array<{ name: string; offset: number; size: number }> = []
+    for (let i = 0; i < vec.size(); i++) {
+      const item = vec.get(i)
+      list.push({ name: item.name, offset: item.offset, size: item.size })
+    }
+    return list
   }
 
   static async getAllOpcodeFormats() {

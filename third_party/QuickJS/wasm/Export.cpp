@@ -17,6 +17,10 @@ EMSCRIPTEN_BINDINGS(quickjs_wasm) {
   register_vector<JSMode>("JSModeArray");
   register_vector<PC2Line>("PC2LineArray");
   register_vector<SpecialObject>("SpecialObjectArray");
+  register_vector<ParseFunctionEnumEntry>("ParseFunctionEnumArray");
+  register_vector<ParseExportEnumEntry>("ParseExportEnumArray");
+  register_vector<VarKindEnumEntry>("VarKindEnumArray");
+  register_vector<LayoutField>("LayoutFieldArray");
 
   enum_<CompileFlags>("CompileFlags")
     .value("COMPILE_FLAG_NONE", COMPILE_FLAG_NONE)
@@ -78,6 +82,27 @@ EMSCRIPTEN_BINDINGS(quickjs_wasm) {
     .property("id", &SpecialObject::id)
     .property("name", &SpecialObject::name);
 
+  class_<ParseFunctionEnumEntry>("ParseFunctionEnumEntry")
+    .constructor<>()
+    .property("id", &ParseFunctionEnumEntry::id)
+    .property("name", &ParseFunctionEnumEntry::name);
+
+  class_<ParseExportEnumEntry>("ParseExportEnumEntry")
+    .constructor<>()
+    .property("id", &ParseExportEnumEntry::id)
+    .property("name", &ParseExportEnumEntry::name);
+
+  class_<VarKindEnumEntry>("VarKindEnumEntry")
+    .constructor<>()
+    .property("id", &VarKindEnumEntry::id)
+    .property("name", &VarKindEnumEntry::name);
+
+  class_<LayoutField>("LayoutField")
+    .constructor<>()
+    .property("name", &LayoutField::name)
+    .property("offset", &LayoutField::offset)
+    .property("size", &LayoutField::size);
+
   class_<QuickJSBinding>("QuickJSBinding")
     .constructor<>()
     .class_function("compile", &QuickJSBinding::compile)
@@ -104,5 +129,16 @@ EMSCRIPTEN_BINDINGS(quickjs_wasm) {
     .class_function("getJSModes", &QuickJSBinding::getJSModes)
     .class_function("getPC2LineCodes", &QuickJSBinding::getPC2LineCodes)
     .class_function("getSpecialObjects", &QuickJSBinding::getSpecialObjects)
+    .class_function("getParseFunctionEnums", &QuickJSBinding::getParseFunctionEnums)
+    .class_function("getParseExportEnums", &QuickJSBinding::getParseExportEnums)
+    .class_function("getVarKindEnums", &QuickJSBinding::getVarKindEnums)
+    .class_function("getBlockEnvLayout", &QuickJSBinding::getBlockEnvLayout)
+    .class_function("getFunctionBytecodeLayout", &QuickJSBinding::getFunctionBytecodeLayout)
+    .class_function("getModuleDefLayout", &QuickJSBinding::getModuleDefLayout)
+    .class_function("getFunctionDefLayout", &QuickJSBinding::getFunctionDefLayout)
+    .class_function("getVarDefLayout", &QuickJSBinding::getVarDefLayout)
+    .class_function("getVarScopeLayout", &QuickJSBinding::getVarScopeLayout)
+    .class_function("getClosureVarLayout", &QuickJSBinding::getClosureVarLayout)
+    .class_function("getGlobalVarLayout", &QuickJSBinding::getGlobalVarLayout)
     .smart_ptr<std::shared_ptr<QuickJSBinding>>("shared_ptr<QuickJSBinding>");
 }

@@ -4,11 +4,26 @@
 #include "QuickJS/extension/taro_js_bytecode.h"
 #include "QuickJS/extension/taro_js_types.h"
 #include "QuickJSBinding.h"
+#include <cstddef>
 #include "../src/core/types.h"
+#include "../src/core/parser.h"
 #include "../src/core/builtins/js-function.h"
 #include "../src/core/function.h"
 
 namespace quickjs {
+  namespace {
+    template <typename T>
+    LayoutField make_struct_size(const char* name) {
+      LayoutField field;
+      field.name = name;
+      field.offset = 0;
+      field.size = static_cast<uint32_t>(sizeof(T));
+      return field;
+    }
+  }
+
+#define ADD_FIELD(out, type, field) \
+  out.push_back(LayoutField{#field, static_cast<uint32_t>(offsetof(type, field)), static_cast<uint32_t>(sizeof(((type*)0)->field))});
   std::string getException(JSContext *context, JSValue module) {
     JSValue exception = JS_GetException(context);
     JSValue message = JS_GetPropertyStr(context, exception, "message");
@@ -392,6 +407,259 @@ namespace quickjs {
 
     return kinds;
   }
+
+  std::vector<ParseFunctionEnumEntry> QuickJSBinding::getParseFunctionEnums() {
+    std::vector<ParseFunctionEnumEntry> out;
+
+    out.push_back(ParseFunctionEnumEntry{ id: JS_PARSE_FUNC_STATEMENT, name: "JS_PARSE_FUNC_STATEMENT" });
+    out.push_back(ParseFunctionEnumEntry{ id: JS_PARSE_FUNC_VAR, name: "JS_PARSE_FUNC_VAR" });
+    out.push_back(ParseFunctionEnumEntry{ id: JS_PARSE_FUNC_EXPR, name: "JS_PARSE_FUNC_EXPR" });
+    out.push_back(ParseFunctionEnumEntry{ id: JS_PARSE_FUNC_ARROW, name: "JS_PARSE_FUNC_ARROW" });
+    out.push_back(ParseFunctionEnumEntry{ id: JS_PARSE_FUNC_GETTER, name: "JS_PARSE_FUNC_GETTER" });
+    out.push_back(ParseFunctionEnumEntry{ id: JS_PARSE_FUNC_SETTER, name: "JS_PARSE_FUNC_SETTER" });
+    out.push_back(ParseFunctionEnumEntry{ id: JS_PARSE_FUNC_METHOD, name: "JS_PARSE_FUNC_METHOD" });
+    out.push_back(ParseFunctionEnumEntry{ id: JS_PARSE_FUNC_CLASS_STATIC_INIT, name: "JS_PARSE_FUNC_CLASS_STATIC_INIT" });
+    out.push_back(ParseFunctionEnumEntry{ id: JS_PARSE_FUNC_CLASS_CONSTRUCTOR, name: "JS_PARSE_FUNC_CLASS_CONSTRUCTOR" });
+    out.push_back(ParseFunctionEnumEntry{ id: JS_PARSE_FUNC_DERIVED_CLASS_CONSTRUCTOR, name: "JS_PARSE_FUNC_DERIVED_CLASS_CONSTRUCTOR" });
+
+    return out;
+  }
+
+  std::vector<ParseExportEnumEntry> QuickJSBinding::getParseExportEnums() {
+    std::vector<ParseExportEnumEntry> out;
+
+    out.push_back(ParseExportEnumEntry{ id: JS_PARSE_EXPORT_NONE, name: "JS_PARSE_EXPORT_NONE" });
+    out.push_back(ParseExportEnumEntry{ id: JS_PARSE_EXPORT_NAMED, name: "JS_PARSE_EXPORT_NAMED" });
+    out.push_back(ParseExportEnumEntry{ id: JS_PARSE_EXPORT_DEFAULT, name: "JS_PARSE_EXPORT_DEFAULT" });
+
+    return out;
+  }
+
+  std::vector<VarKindEnumEntry> QuickJSBinding::getVarKindEnums() {
+    std::vector<VarKindEnumEntry> out;
+
+    out.push_back(VarKindEnumEntry{ id: JS_VAR_NORMAL, name: "JS_VAR_NORMAL" });
+    out.push_back(VarKindEnumEntry{ id: JS_VAR_FUNCTION_DECL, name: "JS_VAR_FUNCTION_DECL" });
+    out.push_back(VarKindEnumEntry{ id: JS_VAR_NEW_FUNCTION_DECL, name: "JS_VAR_NEW_FUNCTION_DECL" });
+    out.push_back(VarKindEnumEntry{ id: JS_VAR_CATCH, name: "JS_VAR_CATCH" });
+    out.push_back(VarKindEnumEntry{ id: JS_VAR_FUNCTION_NAME, name: "JS_VAR_FUNCTION_NAME" });
+    out.push_back(VarKindEnumEntry{ id: JS_VAR_PRIVATE_FIELD, name: "JS_VAR_PRIVATE_FIELD" });
+    out.push_back(VarKindEnumEntry{ id: JS_VAR_PRIVATE_METHOD, name: "JS_VAR_PRIVATE_METHOD" });
+    out.push_back(VarKindEnumEntry{ id: JS_VAR_PRIVATE_GETTER, name: "JS_VAR_PRIVATE_GETTER" });
+    out.push_back(VarKindEnumEntry{ id: JS_VAR_PRIVATE_SETTER, name: "JS_VAR_PRIVATE_SETTER" });
+    out.push_back(VarKindEnumEntry{ id: JS_VAR_PRIVATE_GETTER_SETTER, name: "JS_VAR_PRIVATE_GETTER_SETTER" });
+
+    return out;
+  }
+
+  std::vector<LayoutField> QuickJSBinding::getBlockEnvLayout() {
+    std::vector<LayoutField> out;
+    out.push_back(make_struct_size<BlockEnv>("__size__"));
+    ADD_FIELD(out, BlockEnv, prev);
+    ADD_FIELD(out, BlockEnv, label_name);
+    ADD_FIELD(out, BlockEnv, label_break);
+    ADD_FIELD(out, BlockEnv, label_cont);
+    ADD_FIELD(out, BlockEnv, drop_count);
+    ADD_FIELD(out, BlockEnv, label_finally);
+    ADD_FIELD(out, BlockEnv, scope_level);
+    return out;
+  }
+
+  std::vector<LayoutField> QuickJSBinding::getFunctionBytecodeLayout() {
+    std::vector<LayoutField> out;
+    out.push_back(make_struct_size<JSFunctionBytecode>("__size__"));
+    ADD_FIELD(out, JSFunctionBytecode, header);
+    ADD_FIELD(out, JSFunctionBytecode, js_mode);
+    ADD_FIELD(out, JSFunctionBytecode, byte_code_buf);
+    ADD_FIELD(out, JSFunctionBytecode, byte_code_len);
+    ADD_FIELD(out, JSFunctionBytecode, func_name);
+    ADD_FIELD(out, JSFunctionBytecode, vardefs);
+    ADD_FIELD(out, JSFunctionBytecode, closure_var);
+    ADD_FIELD(out, JSFunctionBytecode, arg_count);
+    ADD_FIELD(out, JSFunctionBytecode, var_count);
+    ADD_FIELD(out, JSFunctionBytecode, defined_arg_count);
+    ADD_FIELD(out, JSFunctionBytecode, stack_size);
+    ADD_FIELD(out, JSFunctionBytecode, realm);
+    ADD_FIELD(out, JSFunctionBytecode, cpool);
+    ADD_FIELD(out, JSFunctionBytecode, cpool_count);
+    ADD_FIELD(out, JSFunctionBytecode, closure_var_count);
+    ADD_FIELD(out, JSFunctionBytecode, ic);
+    ADD_FIELD(out, JSFunctionBytecode, debug);
+    return out;
+  }
+
+  std::vector<LayoutField> QuickJSBinding::getModuleDefLayout() {
+    std::vector<LayoutField> out;
+    out.push_back(make_struct_size<JSModuleDef>("__size__"));
+    ADD_FIELD(out, JSModuleDef, header);
+    ADD_FIELD(out, JSModuleDef, module_name);
+    ADD_FIELD(out, JSModuleDef, link);
+    ADD_FIELD(out, JSModuleDef, req_module_entries);
+    ADD_FIELD(out, JSModuleDef, req_module_entries_count);
+    ADD_FIELD(out, JSModuleDef, req_module_entries_size);
+    ADD_FIELD(out, JSModuleDef, export_entries);
+    ADD_FIELD(out, JSModuleDef, export_entries_count);
+    ADD_FIELD(out, JSModuleDef, export_entries_size);
+    ADD_FIELD(out, JSModuleDef, star_export_entries);
+    ADD_FIELD(out, JSModuleDef, star_export_entries_count);
+    ADD_FIELD(out, JSModuleDef, star_export_entries_size);
+    ADD_FIELD(out, JSModuleDef, import_entries);
+    ADD_FIELD(out, JSModuleDef, import_entries_count);
+    ADD_FIELD(out, JSModuleDef, import_entries_size);
+    ADD_FIELD(out, JSModuleDef, module_ns);
+    ADD_FIELD(out, JSModuleDef, func_obj);
+    ADD_FIELD(out, JSModuleDef, init_func);
+    ADD_FIELD(out, JSModuleDef, init_data_func);
+    ADD_FIELD(out, JSModuleDef, dfs_index);
+    ADD_FIELD(out, JSModuleDef, dfs_ancestor_index);
+    ADD_FIELD(out, JSModuleDef, stack_prev);
+    ADD_FIELD(out, JSModuleDef, async_parent_modules);
+    ADD_FIELD(out, JSModuleDef, async_parent_modules_count);
+    ADD_FIELD(out, JSModuleDef, async_parent_modules_size);
+    ADD_FIELD(out, JSModuleDef, pending_async_dependencies);
+    ADD_FIELD(out, JSModuleDef, async_evaluation_timestamp);
+    ADD_FIELD(out, JSModuleDef, cycle_root);
+    ADD_FIELD(out, JSModuleDef, promise);
+    ADD_FIELD(out, JSModuleDef, resolving_funcs);
+    ADD_FIELD(out, JSModuleDef, eval_exception);
+    ADD_FIELD(out, JSModuleDef, meta_obj);
+    ADD_FIELD(out, JSModuleDef, private_value);
+    ADD_FIELD(out, JSModuleDef, init_data_opaque);
+      return out;
+  }
+
+    std::vector<LayoutField> QuickJSBinding::getVarDefLayout() {
+      std::vector<LayoutField> out;
+      out.push_back(make_struct_size<JSVarDef>("__size__"));
+      ADD_FIELD(out, JSVarDef, var_name);
+      ADD_FIELD(out, JSVarDef, scope_level);
+      ADD_FIELD(out, JSVarDef, scope_next);
+      return out;
+    }
+
+    std::vector<LayoutField> QuickJSBinding::getVarScopeLayout() {
+      std::vector<LayoutField> out;
+      out.push_back(make_struct_size<JSVarScope>("__size__"));
+      ADD_FIELD(out, JSVarScope, parent);
+      ADD_FIELD(out, JSVarScope, first);
+      return out;
+    }
+
+    std::vector<LayoutField> QuickJSBinding::getClosureVarLayout() {
+      std::vector<LayoutField> out;
+      out.push_back(make_struct_size<JSClosureVar>("__size__"));
+      ADD_FIELD(out, JSClosureVar, var_idx);
+      ADD_FIELD(out, JSClosureVar, var_name);
+      return out;
+    }
+
+    std::vector<LayoutField> QuickJSBinding::getGlobalVarLayout() {
+      std::vector<LayoutField> out;
+      out.push_back(make_struct_size<JSGlobalVar>("__size__"));
+      ADD_FIELD(out, JSGlobalVar, cpool_idx);
+      ADD_FIELD(out, JSGlobalVar, scope_level);
+      ADD_FIELD(out, JSGlobalVar, var_name);
+      return out;
+    }
+
+    std::vector<LayoutField> QuickJSBinding::getFunctionDefLayout() {
+      std::vector<LayoutField> out;
+      out.push_back(make_struct_size<JSFunctionDef>("__size__"));
+      ADD_FIELD(out, JSFunctionDef, ctx);
+      ADD_FIELD(out, JSFunctionDef, parent);
+      ADD_FIELD(out, JSFunctionDef, parent_cpool_idx);
+      ADD_FIELD(out, JSFunctionDef, parent_scope_level);
+      ADD_FIELD(out, JSFunctionDef, child_list);
+      ADD_FIELD(out, JSFunctionDef, link);
+      ADD_FIELD(out, JSFunctionDef, is_eval);
+      ADD_FIELD(out, JSFunctionDef, eval_type);
+      ADD_FIELD(out, JSFunctionDef, is_global_var);
+      ADD_FIELD(out, JSFunctionDef, is_func_expr);
+      ADD_FIELD(out, JSFunctionDef, has_home_object);
+      ADD_FIELD(out, JSFunctionDef, has_prototype);
+      ADD_FIELD(out, JSFunctionDef, has_simple_parameter_list);
+      ADD_FIELD(out, JSFunctionDef, has_parameter_expressions);
+      ADD_FIELD(out, JSFunctionDef, has_use_strict);
+      ADD_FIELD(out, JSFunctionDef, has_eval_call);
+      ADD_FIELD(out, JSFunctionDef, has_arguments_binding);
+      ADD_FIELD(out, JSFunctionDef, has_this_binding);
+      ADD_FIELD(out, JSFunctionDef, new_target_allowed);
+      ADD_FIELD(out, JSFunctionDef, super_call_allowed);
+      ADD_FIELD(out, JSFunctionDef, super_allowed);
+      ADD_FIELD(out, JSFunctionDef, arguments_allowed);
+      ADD_FIELD(out, JSFunctionDef, is_derived_class_constructor);
+      ADD_FIELD(out, JSFunctionDef, in_function_body);
+      ADD_FIELD(out, JSFunctionDef, js_mode);
+      ADD_FIELD(out, JSFunctionDef, func_name);
+      ADD_FIELD(out, JSFunctionDef, vars);
+      ADD_FIELD(out, JSFunctionDef, var_size);
+      ADD_FIELD(out, JSFunctionDef, var_count);
+      ADD_FIELD(out, JSFunctionDef, args);
+      ADD_FIELD(out, JSFunctionDef, arg_size);
+      ADD_FIELD(out, JSFunctionDef, arg_count);
+      ADD_FIELD(out, JSFunctionDef, defined_arg_count);
+      ADD_FIELD(out, JSFunctionDef, var_object_idx);
+      ADD_FIELD(out, JSFunctionDef, arg_var_object_idx);
+      ADD_FIELD(out, JSFunctionDef, arguments_var_idx);
+      ADD_FIELD(out, JSFunctionDef, arguments_arg_idx);
+      ADD_FIELD(out, JSFunctionDef, func_var_idx);
+      ADD_FIELD(out, JSFunctionDef, eval_ret_idx);
+      ADD_FIELD(out, JSFunctionDef, this_var_idx);
+      ADD_FIELD(out, JSFunctionDef, new_target_var_idx);
+      ADD_FIELD(out, JSFunctionDef, this_active_func_var_idx);
+      ADD_FIELD(out, JSFunctionDef, home_object_var_idx);
+      ADD_FIELD(out, JSFunctionDef, need_home_object);
+      ADD_FIELD(out, JSFunctionDef, scope_level);
+      ADD_FIELD(out, JSFunctionDef, scope_first);
+      ADD_FIELD(out, JSFunctionDef, scope_size);
+      ADD_FIELD(out, JSFunctionDef, scope_count);
+      ADD_FIELD(out, JSFunctionDef, scopes);
+      ADD_FIELD(out, JSFunctionDef, def_scope_array);
+      ADD_FIELD(out, JSFunctionDef, body_scope);
+      ADD_FIELD(out, JSFunctionDef, global_var_count);
+      ADD_FIELD(out, JSFunctionDef, global_var_size);
+      ADD_FIELD(out, JSFunctionDef, global_vars);
+      ADD_FIELD(out, JSFunctionDef, byte_code);
+      ADD_FIELD(out, JSFunctionDef, last_opcode_pos);
+      ADD_FIELD(out, JSFunctionDef, last_opcode_source_ptr);
+      ADD_FIELD(out, JSFunctionDef, use_short_opcodes);
+      ADD_FIELD(out, JSFunctionDef, label_slots);
+      ADD_FIELD(out, JSFunctionDef, label_size);
+      ADD_FIELD(out, JSFunctionDef, label_count);
+      ADD_FIELD(out, JSFunctionDef, top_break);
+      ADD_FIELD(out, JSFunctionDef, cpool);
+      ADD_FIELD(out, JSFunctionDef, cpool_count);
+      ADD_FIELD(out, JSFunctionDef, cpool_size);
+      ADD_FIELD(out, JSFunctionDef, closure_var_count);
+      ADD_FIELD(out, JSFunctionDef, closure_var_size);
+      ADD_FIELD(out, JSFunctionDef, closure_var);
+      ADD_FIELD(out, JSFunctionDef, jump_slots);
+      ADD_FIELD(out, JSFunctionDef, jump_size);
+      ADD_FIELD(out, JSFunctionDef, jump_count);
+      ADD_FIELD(out, JSFunctionDef, line_number_slots);
+      ADD_FIELD(out, JSFunctionDef, line_number_size);
+      ADD_FIELD(out, JSFunctionDef, line_number_count);
+      ADD_FIELD(out, JSFunctionDef, line_number_last);
+      ADD_FIELD(out, JSFunctionDef, line_number_last_pc);
+      ADD_FIELD(out, JSFunctionDef, column_number_slots);
+      ADD_FIELD(out, JSFunctionDef, column_number_size);
+      ADD_FIELD(out, JSFunctionDef, column_number_count);
+      ADD_FIELD(out, JSFunctionDef, column_number_last);
+      ADD_FIELD(out, JSFunctionDef, column_number_last_pc);
+      ADD_FIELD(out, JSFunctionDef, filename);
+      ADD_FIELD(out, JSFunctionDef, source_pos);
+      ADD_FIELD(out, JSFunctionDef, get_line_col_cache);
+      ADD_FIELD(out, JSFunctionDef, pc2line);
+      ADD_FIELD(out, JSFunctionDef, pc2column);
+      ADD_FIELD(out, JSFunctionDef, source);
+      ADD_FIELD(out, JSFunctionDef, source_len);
+      ADD_FIELD(out, JSFunctionDef, module);
+      ADD_FIELD(out, JSFunctionDef, has_await);
+      ADD_FIELD(out, JSFunctionDef, ic);
+      return out;
+    }
+
+  #undef ADD_FIELD
 
   std::vector<BytecodeTag> QuickJSBinding::getBytecodeTags() {
     std::vector<BytecodeTag> tags;

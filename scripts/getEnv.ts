@@ -1,9 +1,10 @@
 import { QuickJSLib } from './QuickJSLib'
-import { writeFileSync } from 'node:fs'
+import { mkdirSync, writeFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 
 async function main() {
   const envPath = resolve(process.cwd(), 'src/env.ts')
+  mkdirSync(resolve(process.cwd(), 'src'), { recursive: true })
   
   const compileFlags = await QuickJSLib.getCompileEnums()
   const putLValueEnum = await QuickJSLib.getPutLValueEnum()
@@ -12,6 +13,9 @@ async function main() {
   const jsModes = await QuickJSLib.getJSModes()
   const pc2LineCodes = await QuickJSLib.getPC2LineCodes()
   const specialObjects = await QuickJSLib.getSpecialObjects()
+  const parseFunctionEnums = await QuickJSLib.getParseFunctionEnums()
+  const parseExportEnums = await QuickJSLib.getParseExportEnums()
+  const varKindEnums = await QuickJSLib.getVarKindEnums()
   const opFormats = await QuickJSLib.getAllOpcodeFormats()
   const opcodes = await QuickJSLib.getAllOpcodes()
   const atoms = await QuickJSLib.getAllAtoms()
@@ -29,7 +33,7 @@ async function main() {
 
   const lines: string[] = []
   lines.push(`// 本文件由 scripts/getEnv.ts 自动生成`)
-  lines.push(`// 请勿手工编辑。`)
+  lines.push(`// @generated 请勿手工编辑。`)
   lines.push(`// 生成时间: ${new Date().toISOString()}`)
   lines.push(``)
 
@@ -145,6 +149,30 @@ async function main() {
   // PC2Line
   lines.push(`export enum PC2Line {`)
   for (const [key, value] of Object.entries(pc2LineCodes)) {
+    lines.push(`  ${key} = ${value},`)
+  }
+  lines.push(`}`)
+  lines.push(``)
+
+  // JSParseFunctionEnum
+  lines.push(`export enum JSParseFunctionEnum {`)
+  for (const [key, value] of Object.entries(parseFunctionEnums)) {
+    lines.push(`  ${key} = ${value},`)
+  }
+  lines.push(`}`)
+  lines.push(``)
+
+  // JSParseExportEnum
+  lines.push(`export enum JSParseExportEnum {`)
+  for (const [key, value] of Object.entries(parseExportEnums)) {
+    lines.push(`  ${key} = ${value},`)
+  }
+  lines.push(`}`)
+  lines.push(``)
+
+  // JSVarKindEnum
+  lines.push(`export enum JSVarKindEnum {`)
+  for (const [key, value] of Object.entries(varKindEnums)) {
     lines.push(`  ${key} = ${value},`)
   }
   lines.push(`}`)

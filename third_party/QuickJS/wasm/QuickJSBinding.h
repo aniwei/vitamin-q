@@ -68,6 +68,27 @@ struct SpecialObject {
   std::string name;
 };
 
+struct ParseFunctionEnumEntry {
+  uint32_t id;
+  std::string name;
+};
+
+struct ParseExportEnumEntry {
+  uint32_t id;
+  std::string name;
+};
+
+struct VarKindEnumEntry {
+  uint32_t id;
+  std::string name;
+};
+
+struct LayoutField {
+  std::string name;
+  uint32_t offset;
+  uint32_t size;
+};
+
 class QuickJSBinding {
   using Ptr = std::shared_ptr<QuickJSBinding>;
 
@@ -120,6 +141,17 @@ class QuickJSBinding {
   static std::vector<JSMode> getJSModes();
   static std::vector<PC2Line> getPC2LineCodes();
   static std::vector<SpecialObject> getSpecialObjects();
+  static std::vector<ParseFunctionEnumEntry> getParseFunctionEnums();
+  static std::vector<ParseExportEnumEntry> getParseExportEnums();
+  static std::vector<VarKindEnumEntry> getVarKindEnums();
+  static std::vector<LayoutField> getBlockEnvLayout();
+  static std::vector<LayoutField> getFunctionBytecodeLayout();
+  static std::vector<LayoutField> getModuleDefLayout();
+  static std::vector<LayoutField> getFunctionDefLayout();
+  static std::vector<LayoutField> getVarDefLayout();
+  static std::vector<LayoutField> getVarScopeLayout();
+  static std::vector<LayoutField> getClosureVarLayout();
+  static std::vector<LayoutField> getGlobalVarLayout();
 
   static std::vector<Atom> getAtoms();
   static std::vector<Atom> getEnvironmentAtoms();
