@@ -2,9 +2,10 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import ts from 'typescript'
 
+import { QuickJSLib } from '../../../scripts/QuickJSLib'
 import { parseSource } from '../parser'
 import { traverseSourceFile } from '../visitor'
-import { createLineColCache, getPositionLocation } from '../source-location'
+import { createLineColCache, getByteOffset, getLineColCached, getPositionLocation } from '../source-location'
 import { AstDispatcher } from '../dispatcher'
 
 test('ast: parseSource 支持 TS/JS 脚本类型', () => {
@@ -47,6 +48,29 @@ test('ast: source-location 行列缓存与回退', () => {
 
   const locStart = getPositionLocation(file, 0, cache)
   assert.deepEqual(locStart, { line: 0, column: 0 })
+})
+
+test('ast: source-location 与 WASM 对齐', async () => {
+  const text = 'a\n𠮷b\nc'
+  const file = ts.createSourceFile('demo.ts', text, ts.ScriptTarget.ES2020, true)
+
+  for (let pos = 0; pos <= text.length; pos += 1) {
+    const bytePos = getByteOffset(text, pos)
+    const wasm = await QuickJSLib.getLineCol(text, bytePos)
+    const actual = getPositionLocation(file, pos)
+    assert.deepEqual(actual, wasm, `位置 ${pos} 行列不一致`)
+  }
+
+  const cache = createLineColCache(text)
+  let wasmCache = { ptr: 0, line: 0, column: 0 }
+  const positions = [0, 1, 2, text.length, 2, 0]
+
+  for (const pos of positions) {
+    const bytePos = getByteOffset(text, pos)
+    const actual = getLineColCached(cache, bytePos)
+    wasmCache = await QuickJSLib.getLineColCached(text, bytePos, wasmCache)
+    assert.deepEqual(actual, { line: wasmCache.line, column: wasmCache.column })
+  }
 })
 
 test('ast: dispatcher 按类别分发', () => {

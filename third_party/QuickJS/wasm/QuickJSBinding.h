@@ -89,6 +89,17 @@ struct LayoutField {
   uint32_t size;
 };
 
+struct LineCol {
+  int32_t line;
+  int32_t column;
+};
+
+struct LineColCache {
+  uint32_t ptr;
+  int32_t line;
+  int32_t column;
+};
+
 class QuickJSBinding {
   using Ptr = std::shared_ptr<QuickJSBinding>;
 
@@ -156,6 +167,17 @@ class QuickJSBinding {
   static std::vector<LayoutField> getExportEntryLayout();
   static std::vector<LayoutField> getStarExportEntryLayout();
   static std::vector<LayoutField> getReqModuleEntryLayout();
+
+  static LineCol getLineCol(
+    std::string input,
+    uint32_t position);
+
+  static LineColCache getLineColCached(
+    std::string input,
+    uint32_t position,
+    uint32_t cachePtr,
+    int32_t cacheLine,
+    int32_t cacheColumn);
 
   static std::vector<Atom> getAtoms();
   static std::vector<Atom> getEnvironmentAtoms();

@@ -695,6 +695,74 @@ namespace quickjs {
       return out;
     }
 
+    static inline bool is_utf8_lead(uint8_t c) {
+      return (c < 0x80) || (c >= 0xc0);
+    }
+
+    static LineCol get_line_col_range(const std::string& input, uint32_t start, uint32_t end) {
+      LineCol out{0, 0};
+      const uint32_t limit = std::min<uint32_t>(end, input.size());
+      for (uint32_t i = std::min<uint32_t>(start, input.size()); i < limit; i++) {
+        const uint8_t c = static_cast<uint8_t>(input[i]);
+        if (c == '\n') {
+          out.line += 1;
+          out.column = 0;
+        } else if (is_utf8_lead(c)) {
+          out.column += 1;
+        }
+      }
+      return out;
+    }
+
+    static int32_t get_column_from_line_start(const std::string& input, uint32_t position) {
+      int32_t column = 0;
+      if (input.empty()) return column;
+      uint32_t i = std::min<uint32_t>(position, input.size());
+      while (i > 0) {
+        i--;
+        const uint8_t c = static_cast<uint8_t>(input[i]);
+        if (c == '\n') break;
+        if (is_utf8_lead(c)) column += 1;
+      }
+      return column;
+    }
+
+    LineCol QuickJSBinding::getLineCol(std::string input, uint32_t position) {
+      const uint32_t pos = std::min<uint32_t>(position, input.size());
+      return get_line_col_range(input, 0, pos);
+    }
+
+    LineColCache QuickJSBinding::getLineColCached(
+      std::string input,
+      uint32_t position,
+      uint32_t cachePtr,
+      int32_t cacheLine,
+      int32_t cacheColumn) {
+      LineColCache cache{cachePtr, cacheLine, cacheColumn};
+      const uint32_t pos = std::min<uint32_t>(position, input.size());
+
+      if (pos >= cache.ptr) {
+        LineCol delta = get_line_col_range(input, cache.ptr, pos);
+        if (delta.line == 0) {
+          cache.column += delta.column;
+        } else {
+          cache.line += delta.line;
+          cache.column = delta.column;
+        }
+      } else {
+        LineCol delta = get_line_col_range(input, pos, cache.ptr);
+        if (delta.line == 0) {
+          cache.column -= delta.column;
+        } else {
+          cache.line -= delta.line;
+          cache.column = get_column_from_line_start(input, pos);
+        }
+      }
+
+      cache.ptr = pos;
+      return cache;
+    }
+
   #undef ADD_FIELD
 
   std::vector<BytecodeTag> QuickJSBinding::getBytecodeTags() {

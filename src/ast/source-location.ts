@@ -11,7 +11,8 @@ export interface SourceRange {
 }
 
 export interface LineColCache {
-  source: string
+  text: string
+  bytes: Uint8Array
   ptr: number
   line: number
   column: number
@@ -23,15 +24,25 @@ export interface LineColCache {
  * @source QuickJS/src/core/parser.c:131-170
  * @see get_line_col
  */
+const encoder = new TextEncoder()
+
+const isUtf8Lead = (byte: number): boolean => byte < 0x80 || byte >= 0xc0
+
 export const getLineCol = (source: string, start: number, end: number): SourceLineCol => {
+  const bytes = encoder.encode(source)
+  return getLineColFromBytes(bytes, start, end)
+}
+
+const getLineColFromBytes = (bytes: Uint8Array, start: number, end: number): SourceLineCol => {
   let line = 0
   let column = 0
-  const segment = source.slice(start, end)
-  for (const ch of segment) {
-    if (ch === '\n') {
+  const limit = Math.min(end, bytes.length)
+  for (let i = Math.max(0, start); i < limit; i += 1) {
+    const c = bytes[i]
+    if (c === 0x0a) {
       line += 1
       column = 0
-    } else {
+    } else if (isUtf8Lead(c)) {
       column += 1
     }
   }
@@ -44,8 +55,9 @@ export const getLineCol = (source: string, start: number, end: number): SourceLi
  * @source QuickJS/src/core/parser.c:151-193
  * @see get_line_col_cached
  */
-export const createLineColCache = (source: string): LineColCache => ({
-  source,
+export const createLineColCache = (text: string): LineColCache => ({
+  text,
+  bytes: encoder.encode(text),
   ptr: 0,
   line: 0,
   column: 0,
@@ -57,16 +69,24 @@ export const createLineColCache = (source: string): LineColCache => ({
  * @source QuickJS/src/core/parser.c:151-193
  * @see get_line_col_cached
  */
-const getColumnFromLineStart = (source: string, position: number): number => {
-  const lineStart = source.lastIndexOf('\n', position - 1)
-  const segment = source.slice(lineStart + 1, position)
+const getColumnFromLineStart = (bytes: Uint8Array, position: number): number => {
   let column = 0
-  for (const ch of segment) {
-    if (ch === '\n') break
-    column += 1
+  for (let i = Math.min(position - 1, bytes.length - 1); i >= 0; i -= 1) {
+    const c = bytes[i]
+    if (c === 0x0a) break
+    if (isUtf8Lead(c)) column += 1
   }
   return column
 }
+
+/**
+ * 将 UTF-16 位置转换为 UTF-8 字节偏移。
+ *
+ * @source QuickJS/src/core/parser.c:131-193
+ * @see get_line_col
+ */
+export const getByteOffset = (source: string, position: number): number =>
+  encoder.encode(source.slice(0, position)).length
 
 /**
  * 增量计算行列号（等价 get_line_col_cached）。
@@ -75,8 +95,9 @@ const getColumnFromLineStart = (source: string, position: number): number => {
  * @see get_line_col_cached
  */
 export const getLineColCached = (cache: LineColCache, position: number): SourceLineCol => {
-  if (position >= cache.ptr) {
-    const delta = getLineCol(cache.source, cache.ptr, position)
+  const bytePos = Math.min(position, cache.bytes.length)
+  if (bytePos >= cache.ptr) {
+    const delta = getLineColFromBytes(cache.bytes, cache.ptr, bytePos)
     if (delta.line === 0) {
       cache.column += delta.column
     } else {
@@ -84,16 +105,16 @@ export const getLineColCached = (cache: LineColCache, position: number): SourceL
       cache.column = delta.column
     }
   } else {
-    const delta = getLineCol(cache.source, position, cache.ptr)
+    const delta = getLineColFromBytes(cache.bytes, bytePos, cache.ptr)
     if (delta.line === 0) {
       cache.column -= delta.column
     } else {
       cache.line -= delta.line
-      cache.column = getColumnFromLineStart(cache.source, position)
+      cache.column = getColumnFromLineStart(cache.bytes, bytePos)
     }
   }
 
-  cache.ptr = position
+  cache.ptr = bytePos
   return { line: cache.line, column: cache.column }
 }
 
@@ -108,8 +129,9 @@ export const getPositionLocation = (
   position: number,
   cache?: LineColCache,
 ): SourceLineCol => {
-  if (cache) return getLineColCached(cache, position)
-  return getLineCol(sourceFile.text, 0, position)
+  const bytePos = getByteOffset(sourceFile.text, position)
+  if (cache) return getLineColCached(cache, bytePos)
+  return getLineCol(sourceFile.text, 0, bytePos)
 }
 
 /**

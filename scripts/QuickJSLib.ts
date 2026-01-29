@@ -56,6 +56,14 @@ interface WasmInstance {
   getExportEntryLayout: () => Array<{ name: string; offset: number; size: number }>
   getStarExportEntryLayout: () => Array<{ name: string; offset: number; size: number }>
   getReqModuleEntryLayout: () => Array<{ name: string; offset: number; size: number }>
+  getLineCol: (input: string, position: number) => { line: number; column: number }
+  getLineColCached: (
+    input: string,
+    position: number,
+    cachePtr: number,
+    cacheLine: number,
+    cacheColumn: number,
+  ) => { ptr: number; line: number; column: number }
 }
 
 export class QuickJSLib {
@@ -215,6 +223,28 @@ export class QuickJSLib {
     enums['COMPILE_FLAG_SHORT_OPCODES'] = WasmInstance.CompileFlags.COMPILE_FLAG_SHORT_OPCODES.value
 
     return enums
+  }
+
+  static getLineCol = async (input: string, position: number): Promise<{ line: number; column: number }> => {
+    const WasmInstance = await QuickJSLib.getWasmInstance()
+    const result = WasmInstance.QuickJSBinding.getLineCol(input, position)
+    return { line: result.line, column: result.column }
+  }
+
+  static getLineColCached = async (
+    input: string,
+    position: number,
+    cache: { ptr: number; line: number; column: number },
+  ): Promise<{ ptr: number; line: number; column: number }> => {
+    const WasmInstance = await QuickJSLib.getWasmInstance()
+    const result = WasmInstance.QuickJSBinding.getLineColCached(
+      input,
+      position,
+      cache.ptr,
+      cache.line,
+      cache.column,
+    )
+    return { ptr: result.ptr, line: result.line, column: result.column }
   }
 
   static async runWithBinaryPath(binaryPath: string) {

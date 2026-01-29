@@ -22,6 +22,17 @@ EMSCRIPTEN_BINDINGS(quickjs_wasm) {
   register_vector<VarKindEnumEntry>("VarKindEnumArray");
   register_vector<LayoutField>("LayoutFieldArray");
 
+  class_<LineCol>("LineCol")
+    .constructor<>()
+    .property("line", &LineCol::line)
+    .property("column", &LineCol::column);
+
+  class_<LineColCache>("LineColCache")
+    .constructor<>()
+    .property("ptr", &LineColCache::ptr)
+    .property("line", &LineColCache::line)
+    .property("column", &LineColCache::column);
+
   enum_<CompileFlags>("CompileFlags")
     .value("COMPILE_FLAG_NONE", COMPILE_FLAG_NONE)
     .value("COMPILE_FLAG_DUMP", COMPILE_FLAG_DUMP)
@@ -144,5 +155,7 @@ EMSCRIPTEN_BINDINGS(quickjs_wasm) {
     .class_function("getExportEntryLayout", &QuickJSBinding::getExportEntryLayout)
     .class_function("getStarExportEntryLayout", &QuickJSBinding::getStarExportEntryLayout)
     .class_function("getReqModuleEntryLayout", &QuickJSBinding::getReqModuleEntryLayout)
+    .class_function("getLineCol", &QuickJSBinding::getLineCol)
+    .class_function("getLineColCached", &QuickJSBinding::getLineColCached)
     .smart_ptr<std::shared_ptr<QuickJSBinding>>("shared_ptr<QuickJSBinding>");
 }

@@ -134,24 +134,24 @@
 
 ## 3. 字节码发射模块 - Phase 1
 
-- [ ] 3.1 实现字节码缓冲区 (`src/emitter/bytecode-buffer.ts`)
+- [x] 3.1 实现字节码缓冲区 (`src/emitter/bytecode-buffer.ts`)
   - 动态增长的字节缓冲区
   - 写入 u8, u16, u32, i32 等
   - 标签占位符管理
   - **标注 C 源码**: 对应 DynBuf 相关函数
 
-- [ ] 3.2 实现常量池管理 (`src/emitter/constant-pool.ts`)
+- [x] 3.2 实现常量池管理 (`src/emitter/constant-pool.ts`)
   - cpool_add 实现
   - 常量去重
   - 索引管理
   - **标注 C 源码**: 对应 cpool_add 函数
 
-- [ ] 3.3 实现标签管理 (`src/emitter/label-manager.ts`)
+- [x] 3.3 实现标签管理 (`src/emitter/label-manager.ts`)
   - new_label, emit_label, emit_goto
   - 前向引用处理
   - 标签位置记录
 
-- [ ] 3.4 实现主发射器 (`src/emitter/emitter.ts`)
+- [x] 3.4 实现主发射器 (`src/emitter/emitter.ts`)
   - emit_op, emit_u8, emit_u16, emit_u32
   - emit_source_pos（OP_line_num 插入）
   - emit_atom（JS_DupAtom 编码写入）
