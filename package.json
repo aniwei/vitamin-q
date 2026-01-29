@@ -7,7 +7,8 @@
     "gen:env": "tsx scripts/getEnv.ts",
     "generate:types": "tsx scripts/getEnv.ts",
     "test:types": "tsx --test src/types/__tests__/*.test.ts",
-    "test:ast": "tsx --test src/ast/__tests__/*.test.ts"
+    "test:ast": "tsx --test src/ast/__tests__/*.test.ts",
+    "test:emitter": "tsx --test src/emitter/__tests__/*.test.ts"
   },
   "devDependencies": {
     "@types/node": "^20.19.13",

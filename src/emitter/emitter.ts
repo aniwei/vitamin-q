@@ -8,6 +8,7 @@ import type { AtomTable } from './atom-table'
 import { InlineCacheManager } from './inline-cache'
 import { LabelManager } from './label-manager'
 import { ConstantPoolManager } from './constant-pool'
+import { ExpressionEmitter } from './expressions'
 
 import { AstDispatcher } from '../ast/dispatcher'
 import { createLineColCache, getByteOffset } from '../ast/source-location'
@@ -221,10 +222,12 @@ export interface BytecodeCompilerOptions {
 export class BytecodeCompiler {
   private dispatcher: AstDispatcher<EmitterContext, void>
   private options: BytecodeCompilerOptions
+  private expressionEmitter: ExpressionEmitter
 
   constructor(options: BytecodeCompilerOptions = {}) {
     this.options = options
     this.dispatcher = new AstDispatcher<EmitterContext, void>()
+    this.expressionEmitter = new ExpressionEmitter()
     this.dispatcher.setFallback((node) => {
       throw new Error(`未实现节点发射: ${ts.SyntaxKind[node.kind]}`)
     })
@@ -275,5 +278,25 @@ export class BytecodeCompiler {
       context.emitSourcePos(stmt)
       this.dispatcher.dispatch(stmt.expression, context)
     })
+
+    const expressionKinds: ts.SyntaxKind[] = [
+      ts.SyntaxKind.ParenthesizedExpression,
+      ts.SyntaxKind.NumericLiteral,
+      ts.SyntaxKind.BigIntLiteral,
+      ts.SyntaxKind.StringLiteral,
+      ts.SyntaxKind.NoSubstitutionTemplateLiteral,
+      ts.SyntaxKind.TrueKeyword,
+      ts.SyntaxKind.FalseKeyword,
+      ts.SyntaxKind.NullKeyword,
+      ts.SyntaxKind.TypeOfExpression,
+      ts.SyntaxKind.PrefixUnaryExpression,
+      ts.SyntaxKind.BinaryExpression,
+    ]
+
+    for (const kind of expressionKinds) {
+      this.dispatcher.registerExpression(kind, (node, context) => {
+        this.expressionEmitter.emitExpression(node as ts.Expression, context)
+      })
+    }
   }
 }
