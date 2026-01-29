@@ -187,6 +187,7 @@ export interface JSFunctionDef {
   parentCpoolIdx: number
   parentScopeLevel: number
   childList: JSFunctionDef[]
+  link: unknown
 
   isEval: boolean
   evalType: number

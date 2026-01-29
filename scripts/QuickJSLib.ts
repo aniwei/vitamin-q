@@ -52,6 +52,10 @@ interface WasmInstance {
   getVarScopeLayout: () => Array<{ name: string; offset: number; size: number }>
   getClosureVarLayout: () => Array<{ name: string; offset: number; size: number }>
   getGlobalVarLayout: () => Array<{ name: string; offset: number; size: number }>
+  getImportEntryLayout: () => Array<{ name: string; offset: number; size: number }>
+  getExportEntryLayout: () => Array<{ name: string; offset: number; size: number }>
+  getStarExportEntryLayout: () => Array<{ name: string; offset: number; size: number }>
+  getReqModuleEntryLayout: () => Array<{ name: string; offset: number; size: number }>
 }
 
 export class QuickJSLib {
@@ -538,6 +542,50 @@ export class QuickJSLib {
   static async getGlobalVarLayout() {
     const WasmInstance = await QuickJSLib.getWasmInstance()
     const vec = WasmInstance.QuickJSBinding.getGlobalVarLayout()
+    const list: Array<{ name: string; offset: number; size: number }> = []
+    for (let i = 0; i < vec.size(); i++) {
+      const item = vec.get(i)
+      list.push({ name: item.name, offset: item.offset, size: item.size })
+    }
+    return list
+  }
+
+  static async getImportEntryLayout() {
+    const WasmInstance = await QuickJSLib.getWasmInstance()
+    const vec = WasmInstance.QuickJSBinding.getImportEntryLayout()
+    const list: Array<{ name: string; offset: number; size: number }> = []
+    for (let i = 0; i < vec.size(); i++) {
+      const item = vec.get(i)
+      list.push({ name: item.name, offset: item.offset, size: item.size })
+    }
+    return list
+  }
+
+  static async getExportEntryLayout() {
+    const WasmInstance = await QuickJSLib.getWasmInstance()
+    const vec = WasmInstance.QuickJSBinding.getExportEntryLayout()
+    const list: Array<{ name: string; offset: number; size: number }> = []
+    for (let i = 0; i < vec.size(); i++) {
+      const item = vec.get(i)
+      list.push({ name: item.name, offset: item.offset, size: item.size })
+    }
+    return list
+  }
+
+  static async getStarExportEntryLayout() {
+    const WasmInstance = await QuickJSLib.getWasmInstance()
+    const vec = WasmInstance.QuickJSBinding.getStarExportEntryLayout()
+    const list: Array<{ name: string; offset: number; size: number }> = []
+    for (let i = 0; i < vec.size(); i++) {
+      const item = vec.get(i)
+      list.push({ name: item.name, offset: item.offset, size: item.size })
+    }
+    return list
+  }
+
+  static async getReqModuleEntryLayout() {
+    const WasmInstance = await QuickJSLib.getWasmInstance()
+    const vec = WasmInstance.QuickJSBinding.getReqModuleEntryLayout()
     const list: Array<{ name: string; offset: number; size: number }> = []
     for (let i = 0; i < vec.size(); i++) {
       const item = vec.get(i)

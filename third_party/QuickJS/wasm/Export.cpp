@@ -140,5 +140,9 @@ EMSCRIPTEN_BINDINGS(quickjs_wasm) {
     .class_function("getVarScopeLayout", &QuickJSBinding::getVarScopeLayout)
     .class_function("getClosureVarLayout", &QuickJSBinding::getClosureVarLayout)
     .class_function("getGlobalVarLayout", &QuickJSBinding::getGlobalVarLayout)
+    .class_function("getImportEntryLayout", &QuickJSBinding::getImportEntryLayout)
+    .class_function("getExportEntryLayout", &QuickJSBinding::getExportEntryLayout)
+    .class_function("getStarExportEntryLayout", &QuickJSBinding::getStarExportEntryLayout)
+    .class_function("getReqModuleEntryLayout", &QuickJSBinding::getReqModuleEntryLayout)
     .smart_ptr<std::shared_ptr<QuickJSBinding>>("shared_ptr<QuickJSBinding>");
 }

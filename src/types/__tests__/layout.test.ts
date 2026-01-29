@@ -73,6 +73,30 @@ const expectedLayouts: Record<string, LayoutField[]> = {
     { name: 'private_value', offset: 208, size: 8 },
     { name: 'init_data_opaque', offset: 216, size: 4 },
   ],
+  JSImportEntry: [
+    { name: '__size__', offset: 0, size: 16 },
+    { name: 'var_idx', offset: 0, size: 4 },
+    { name: 'is_star', offset: 4, size: 4 },
+    { name: 'import_name', offset: 8, size: 4 },
+    { name: 'req_module_idx', offset: 12, size: 4 },
+  ],
+  JSExportEntry: [
+    { name: '__size__', offset: 0, size: 20 },
+    { name: 'u', offset: 0, size: 8 },
+    { name: 'export_type', offset: 8, size: 4 },
+    { name: 'local_name', offset: 12, size: 4 },
+    { name: 'export_name', offset: 16, size: 4 },
+  ],
+  JSStarExportEntry: [
+    { name: '__size__', offset: 0, size: 4 },
+    { name: 'req_module_idx', offset: 0, size: 4 },
+  ],
+  JSReqModuleEntry: [
+    { name: '__size__', offset: 0, size: 16 },
+    { name: 'module_name', offset: 0, size: 4 },
+    { name: 'module', offset: 4, size: 4 },
+    { name: 'attributes', offset: 8, size: 8 },
+  ],
   JSVarDef: [
     { name: '__size__', offset: 0, size: 16 },
     { name: 'var_name', offset: 0, size: 4 },
@@ -233,4 +257,24 @@ test('layout: JSGlobalVar 对齐', async () => {
 test('layout: JSFunctionDef 对齐', async () => {
   const actual = await QuickJSLib.getFunctionDefLayout()
   assertLayoutEqual('JSFunctionDef', actual, expectedLayouts.JSFunctionDef)
+})
+
+test('layout: JSImportEntry 对齐', async () => {
+  const actual = await QuickJSLib.getImportEntryLayout()
+  assertLayoutEqual('JSImportEntry', actual, expectedLayouts.JSImportEntry)
+})
+
+test('layout: JSExportEntry 对齐', async () => {
+  const actual = await QuickJSLib.getExportEntryLayout()
+  assertLayoutEqual('JSExportEntry', actual, expectedLayouts.JSExportEntry)
+})
+
+test('layout: JSStarExportEntry 对齐', async () => {
+  const actual = await QuickJSLib.getStarExportEntryLayout()
+  assertLayoutEqual('JSStarExportEntry', actual, expectedLayouts.JSStarExportEntry)
+})
+
+test('layout: JSReqModuleEntry 对齐', async () => {
+  const actual = await QuickJSLib.getReqModuleEntryLayout()
+  assertLayoutEqual('JSReqModuleEntry', actual, expectedLayouts.JSReqModuleEntry)
 })

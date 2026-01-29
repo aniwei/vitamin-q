@@ -659,6 +659,42 @@ namespace quickjs {
       return out;
     }
 
+    std::vector<LayoutField> QuickJSBinding::getImportEntryLayout() {
+      std::vector<LayoutField> out;
+      out.push_back(make_struct_size<JSImportEntry>("__size__"));
+      ADD_FIELD(out, JSImportEntry, var_idx);
+      ADD_FIELD(out, JSImportEntry, is_star);
+      ADD_FIELD(out, JSImportEntry, import_name);
+      ADD_FIELD(out, JSImportEntry, req_module_idx);
+      return out;
+    }
+
+    std::vector<LayoutField> QuickJSBinding::getExportEntryLayout() {
+      std::vector<LayoutField> out;
+      out.push_back(make_struct_size<JSExportEntry>("__size__"));
+      ADD_FIELD(out, JSExportEntry, u);
+      ADD_FIELD(out, JSExportEntry, export_type);
+      ADD_FIELD(out, JSExportEntry, local_name);
+      ADD_FIELD(out, JSExportEntry, export_name);
+      return out;
+    }
+
+    std::vector<LayoutField> QuickJSBinding::getStarExportEntryLayout() {
+      std::vector<LayoutField> out;
+      out.push_back(make_struct_size<JSStarExportEntry>("__size__"));
+      ADD_FIELD(out, JSStarExportEntry, req_module_idx);
+      return out;
+    }
+
+    std::vector<LayoutField> QuickJSBinding::getReqModuleEntryLayout() {
+      std::vector<LayoutField> out;
+      out.push_back(make_struct_size<JSReqModuleEntry>("__size__"));
+      ADD_FIELD(out, JSReqModuleEntry, module_name);
+      ADD_FIELD(out, JSReqModuleEntry, module);
+      ADD_FIELD(out, JSReqModuleEntry, attributes);
+      return out;
+    }
+
   #undef ADD_FIELD
 
   std::vector<BytecodeTag> QuickJSBinding::getBytecodeTags() {

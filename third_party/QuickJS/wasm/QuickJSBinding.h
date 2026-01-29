@@ -152,6 +152,10 @@ class QuickJSBinding {
   static std::vector<LayoutField> getVarScopeLayout();
   static std::vector<LayoutField> getClosureVarLayout();
   static std::vector<LayoutField> getGlobalVarLayout();
+  static std::vector<LayoutField> getImportEntryLayout();
+  static std::vector<LayoutField> getExportEntryLayout();
+  static std::vector<LayoutField> getStarExportEntryLayout();
+  static std::vector<LayoutField> getReqModuleEntryLayout();
 
   static std::vector<Atom> getAtoms();
   static std::vector<Atom> getEnvironmentAtoms();

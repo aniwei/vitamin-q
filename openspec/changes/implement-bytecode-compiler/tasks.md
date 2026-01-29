@@ -12,20 +12,20 @@
 
 ## 1. 类型定义和基础架构
 
-- [ ] 1.1 实现枚举/常量生成器 (`scripts/getEnv.ts`)
+- [x] 1.1 实现枚举/常量生成器 (`scripts/getEnv.ts`)
   - 从 QuickJS WASM 导出操作码定义
   - 从 QuickJS WASM 导出常量定义（原子、标志等）
   - 生成 TypeScript 环境文件 `src/env.ts`
   - 添加 `@generated` 标记，标明不要手动修改
 
-- [ ] 1.2 生成操作码枚举（`src/env.ts`）
+- [x] 1.2 生成操作码枚举（`src/env.ts`）
   - 通过 getEnv.ts 从 QuickJS WASM 自动生成
   - OP_COUNT 主操作码 + OP_TEMP_* 临时操作码
   - short opcode 映射（SHORT_OPCODES）
   - OpcodeInfo 映射表（size, nPop, nPush, format）
   - **验证测试**: 确保与 QuickJS WASM 运行时完全对齐
 
-- [ ] 1.3 生成常量定义（`src/env.ts`）
+- [x] 1.3 生成常量定义（`src/env.ts`）
   - 通过 getEnv.ts 从 QuickJS WASM 自动生成
   - 原子常量（JS_ATOM_*）
   - 标志常量（JS_PROP_*、JS_EVAL_*）
@@ -33,19 +33,19 @@
   - PC2LINE_* 压缩表常量
   - 类型标签常量
 
-- [ ] 1.4 枚举/常量对齐单元测试 (`src/types/__tests__/alignment.test.ts`)
+- [x] 1.4 枚举/常量对齐单元测试 (`src/types/__tests__/alignment.test.ts`)
   - 验证 Opcode 枚举值与 QuickJS WASM 完全一致
   - 验证 OpcodeInfo 映射与 QuickJS WASM 完全一致
   - 验证常量值与 QuickJS WASM 完全一致
   - 任何不一致都导致测试失败
 
-- [ ] 1.5 定义操作数格式 (`src/types/operand-format.ts`)
+- [x] 1.5 定义操作数格式 (`src/types/operand-format.ts`)
   - 所有操作数格式类型（none, u8, i8, u16, u32, atom 等）
   - atom_label_u8/atom_label_u16 等复合格式
   - label16/label_u16/npop_u16 等扩展格式
   - 格式编解码函数
 
-- [ ] 1.6 定义 JSFunctionDef (`src/types/function-def.ts`)
+- [x] 1.6 定义 JSFunctionDef (`src/types/function-def.ts`)
   - JSFunctionDef 完整结构，**字段完全对应 C 结构体**
   - **驼峰命名**: `var_count` → `varCount`, `arg_count` → `argCount` 等
   - JSVarDef: 变量定义（var_name, scope_level, scope_next, var_kind 等）
@@ -61,7 +61,7 @@
   - 参考 `docs/quickjs/architecture.md`
   - **标注 C 源码**: `@source parser.h` 中的结构体定义
 
-- [ ] 1.6a 定义 JSFunctionBytecode (`src/types/function-bytecode.ts`)
+- [x] 1.6a 定义 JSFunctionBytecode (`src/types/function-bytecode.ts`)
   - JSFunctionBytecode 完整结构
   - 字节码头标志位
   - has_debug/read_only_bytecode/is_direct_or_indirect_eval
@@ -71,25 +71,25 @@
   - debug 信息结构
   - **标注 C 源码**: `@source types.h` 中的 JSFunctionBytecode
 
-- [ ] 1.6b 定义模块相关类型 (`src/types/module.ts`)
+- [x] 1.6b 定义模块相关类型 (`src/types/module.ts`)
   - JSImportEntry, JSExportEntry, JSStarExportEntry, JSReqModuleEntry
   - JSExportTypeEnum, JSModuleStatus
   - JSModuleDef 完整结构（含 async/tla 状态字段）
   - **标注 C 源码**: `@source types.h` 中的模块结构定义
 
-- [ ] 1.7 定义字节码相关类型 (`src/types/bytecode.ts`)
+- [x] 1.7 定义字节码相关类型 (`src/types/bytecode.ts`)
   - BytecodeBuffer 接口
   - ConstantPool 接口
   - JSValue 类型表示
 
-- [ ] 1.8 设置项目结构
+- [x] 1.8 设置项目结构
   - 创建 `src/` 目录结构
   - 更新 `tsconfig.json`
   - 添加 `typescript` 依赖（用于 Compiler API）
   - 配置测试框架
   - 添加 `generate:types` 脚本运行 getEnv.ts
 
-- [ ] 1.9 实现环境变量配置 (`src/config/env.ts`)
+- [x] 1.9 实现环境变量配置 (`src/config/env.ts`)
   - 定义 `Config` 对象模拟 C 宏
   - 支持 `DEBUG`、`DUMP_BYTECODE`、`DUMP_ATOMS` 等开关
   - 支持 `DUMP_CLOSURE`、`DUMP_SOURCE`、`DUMP_READ_OBJECT` 等
@@ -98,35 +98,35 @@
 
 ## 2. 语句调度模块 (AST Visitor)
 
-- [ ] 2.1 实现源码解析入口 (`src/ast/parser.ts`)
+- [x] 2.1 实现源码解析入口 (`src/ast/parser.ts`)
   - 使用 `ts.createSourceFile` 解析源码
   - 配置 ScriptTarget 为 ES2020
   - 支持 TypeScript 和 JavaScript 输入
 
-- [ ] 2.2 实现 AST 遍历器 (`src/ast/visitor.ts`)
+- [x] 2.2 实现 AST 遍历器 (`src/ast/visitor.ts`)
   - 基于 `ts.forEachChild` 的通用遍历器
   - 节点类型守卫工具函数
   - 遍历上下文管理
 
-- [ ] 2.3 实现源码位置转换 (`src/ast/source-location.ts`)
+- [x] 2.3 实现源码位置转换 (`src/ast/source-location.ts`)
   - ts.Node 位置到 line:column 转换
   - 源码范围管理
   - 调试信息生成支持
   - get_line_col_cached 等价实现（增量计算行列）
   - 错误位置映射（语法错误定位）
 
-- [ ] 2.4 实现 AST 工具函数 (`src/ast/utils.ts`)
+- [x] 2.4 实现 AST 工具函数 (`src/ast/utils.ts`)
   - 节点类型检测辅助函数
   - 表达式类型判断
   - 语句分类工具
 
-- [ ] 2.5 实现语句调度器 (`src/ast/dispatcher.ts`)
+- [x] 2.5 实现语句调度器 (`src/ast/dispatcher.ts`)
   - 根据节点类型分发到对应处理器
   - 表达式调度、语句调度、声明调度
   - 支持自定义处理器注册
   - **标注 C 源码**: 对应 js_parse_* 函数的分发逻辑
 
-- [ ] 2.6 AST 适配层单元测试
+- [x] 2.6 AST 适配层单元测试
   - 解析各类语法结构
   - 位置信息验证
   - TypeScript 特有语法处理验证
