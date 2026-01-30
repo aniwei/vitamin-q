@@ -1,6 +1,6 @@
 import ts from 'typescript'
 
-import { Opcode } from '../env'
+import { Opcode, OPSpecialObjectEnum, TempOpcode } from '../env'
 import type { JSAtom } from '../env'
 
 import type { EmitterContext } from './emitter'
@@ -17,6 +17,15 @@ const emitPushAtomValue = (context: EmitterContext, atom: JSAtom) => {
   context.bytecode.emitOp(Opcode.OP_push_atom_value)
   context.bytecode.emitU32(atom)
   context.bytecode.emitIC(atom)
+}
+
+const emitStringLiteral = (context: EmitterContext, value: string) => {
+  if (context.atomTable) {
+    const atom = context.atomTable.getOrAdd(value)
+    emitPushAtomValue(context, atom)
+  } else {
+    emitPushConst(context, value)
+  }
 }
 
 /**
@@ -55,13 +64,7 @@ export class ExpressionEmitter {
     }
 
     if (ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node)) {
-      const value = node.text
-      if (context.atomTable) {
-        const atom = context.atomTable.getOrAdd(value)
-        emitPushAtomValue(context, atom)
-      } else {
-        emitPushConst(context, value)
-      }
+      emitStringLiteral(context, node.text)
       return
     }
 
@@ -80,9 +83,267 @@ export class ExpressionEmitter {
       return
     }
 
+    if (node.kind === ts.SyntaxKind.ThisKeyword) {
+      context.bytecode.emitOp(Opcode.OP_push_this)
+      return
+    }
+
+    if (node.kind === ts.SyntaxKind.SuperKeyword) {
+      context.bytecode.emitOp(Opcode.OP_get_super)
+      return
+    }
+
+    if (ts.isIdentifier(node)) {
+      const atom = context.getAtom(node.text)
+      const scopeLevel = context.scopes.scopeLevel
+      if (scopeLevel >= 0) {
+        const localIdx = context.scopes.findVarInScope(atom, scopeLevel)
+        if (localIdx >= 0) {
+          context.bytecode.emitOp(Opcode.OP_get_loc)
+          context.bytecode.emitU16(localIdx)
+          return
+        }
+      }
+      context.bytecode.emitOp(Opcode.OP_get_var)
+      context.bytecode.emitAtom(atom)
+      return
+    }
+
+    if (ts.isPropertyAccessChain(node)) {
+      if (node.expression.kind === ts.SyntaxKind.SuperKeyword) {
+        throw new Error('super optional chaining 尚未实现')
+      }
+      this.emitExpression(node.expression, context)
+      const atom = context.getAtom(node.name.text)
+      context.bytecode.emitOp(TempOpcode.OP_get_field_opt_chain)
+      context.bytecode.emitAtom(atom)
+      return
+    }
+
+    if (ts.isPropertyAccessExpression(node)) {
+      if (node.expression.kind === ts.SyntaxKind.SuperKeyword) {
+        context.bytecode.emitOp(Opcode.OP_get_super)
+        emitStringLiteral(context, node.name.text)
+        context.bytecode.emitOp(Opcode.OP_get_super_value)
+        return
+      }
+      this.emitExpression(node.expression, context)
+      const atom = context.getAtom(node.name.text)
+      context.bytecode.emitOp(Opcode.OP_get_field)
+      context.bytecode.emitAtom(atom)
+      return
+    }
+
+    if (ts.isTemplateExpression(node)) {
+      emitStringLiteral(context, node.head.text)
+      for (const span of node.templateSpans) {
+        this.emitExpression(span.expression, context)
+        context.bytecode.emitOp(Opcode.OP_add)
+        emitStringLiteral(context, span.literal.text)
+        context.bytecode.emitOp(Opcode.OP_add)
+      }
+      return
+    }
+
+    if (ts.isMetaProperty(node)) {
+      if (node.keywordToken === ts.SyntaxKind.ImportKeyword && node.name.text === 'meta') {
+        context.bytecode.emitOp(Opcode.OP_special_object)
+        context.bytecode.emitU8(OPSpecialObjectEnum.OP_SPECIAL_OBJECT_IMPORT_META)
+        return
+      }
+      if (node.keywordToken === ts.SyntaxKind.NewKeyword && node.name.text === 'target') {
+        context.bytecode.emitOp(Opcode.OP_special_object)
+        context.bytecode.emitU8(OPSpecialObjectEnum.OP_SPECIAL_OBJECT_NEW_TARGET)
+        return
+      }
+    }
+
+    if (ts.isElementAccessChain(node)) {
+      if (node.expression.kind === ts.SyntaxKind.SuperKeyword) {
+        throw new Error('super optional chaining 尚未实现')
+      }
+      this.emitExpression(node.expression, context)
+      this.emitExpression(node.argumentExpression, context)
+      context.bytecode.emitOp(TempOpcode.OP_get_array_el_opt_chain)
+      return
+    }
+
+    if (ts.isElementAccessExpression(node)) {
+      if (node.expression.kind === ts.SyntaxKind.SuperKeyword) {
+        context.bytecode.emitOp(Opcode.OP_get_super)
+        this.emitExpression(node.argumentExpression, context)
+        context.bytecode.emitOp(Opcode.OP_get_super_value)
+        return
+      }
+      this.emitExpression(node.expression, context)
+      this.emitExpression(node.argumentExpression, context)
+      context.bytecode.emitOp(Opcode.OP_get_array_el)
+      return
+    }
+
+    if (ts.isNewExpression(node)) {
+      this.emitExpression(node.expression, context)
+      const args = node.arguments ?? []
+      for (const arg of args) {
+        this.emitExpression(arg, context)
+      }
+      context.bytecode.emitOp(Opcode.OP_call_constructor)
+      context.bytecode.emitU16(args.length)
+      return
+    }
+
+    if (ts.isCallExpression(node)) {
+      if (node.expression.kind === ts.SyntaxKind.ImportKeyword) {
+        if (node.arguments.length !== 1) {
+          throw new Error('dynamic import 仅支持单参数')
+        }
+        context.bytecode.emitOp(Opcode.OP_special_object)
+        context.bytecode.emitU8(OPSpecialObjectEnum.OP_SPECIAL_OBJECT_IMPORT_META)
+        this.emitExpression(node.arguments[0], context)
+        context.bytecode.emitOp(Opcode.OP_import)
+        return
+      }
+
+      if (node.expression.kind === ts.SyntaxKind.SuperKeyword) {
+        context.bytecode.emitOp(Opcode.OP_get_super)
+        for (const arg of node.arguments) {
+          this.emitExpression(arg, context)
+        }
+        context.bytecode.emitOp(Opcode.OP_call_constructor)
+        context.bytecode.emitU16(node.arguments.length)
+        return
+      }
+
+      if (ts.isCallChain(node)) {
+        const endLabel = context.labels.newLabel()
+
+        if (ts.isPropertyAccessChain(node.expression)) {
+          this.emitExpression(node.expression.expression, context)
+          context.bytecode.emitOp(Opcode.OP_dup)
+          context.bytecode.emitOp(Opcode.OP_is_undefined_or_null)
+          const okLabel = context.labels.emitGoto(Opcode.OP_if_false, -1)
+          context.bytecode.emitOp(Opcode.OP_drop)
+          context.bytecode.emitOp(Opcode.OP_undefined)
+          context.labels.emitGoto(Opcode.OP_goto, endLabel)
+          context.labels.emitLabel(okLabel)
+          const atom = context.getAtom(node.expression.name.text)
+          context.bytecode.emitOp(Opcode.OP_get_field2)
+          context.bytecode.emitAtom(atom)
+          for (const arg of node.arguments) {
+            this.emitExpression(arg, context)
+          }
+          context.bytecode.emitOp(Opcode.OP_call_method)
+          context.bytecode.emitU16(node.arguments.length)
+          context.labels.emitLabel(endLabel)
+          return
+        }
+
+        if (ts.isElementAccessChain(node.expression)) {
+          this.emitExpression(node.expression.expression, context)
+          context.bytecode.emitOp(Opcode.OP_dup)
+          context.bytecode.emitOp(Opcode.OP_is_undefined_or_null)
+          const okLabel = context.labels.emitGoto(Opcode.OP_if_false, -1)
+          context.bytecode.emitOp(Opcode.OP_drop)
+          context.bytecode.emitOp(Opcode.OP_undefined)
+          context.labels.emitGoto(Opcode.OP_goto, endLabel)
+          context.labels.emitLabel(okLabel)
+          this.emitExpression(node.expression.argumentExpression, context)
+          context.bytecode.emitOp(Opcode.OP_get_array_el2)
+          for (const arg of node.arguments) {
+            this.emitExpression(arg, context)
+          }
+          context.bytecode.emitOp(Opcode.OP_call_method)
+          context.bytecode.emitU16(node.arguments.length)
+          context.labels.emitLabel(endLabel)
+          return
+        }
+
+        this.emitExpression(node.expression, context)
+        context.bytecode.emitOp(Opcode.OP_dup)
+        context.bytecode.emitOp(Opcode.OP_is_undefined_or_null)
+        const okLabel = context.labels.emitGoto(Opcode.OP_if_false, -1)
+        context.bytecode.emitOp(Opcode.OP_drop)
+        context.bytecode.emitOp(Opcode.OP_undefined)
+        context.labels.emitGoto(Opcode.OP_goto, endLabel)
+        context.labels.emitLabel(okLabel)
+        for (const arg of node.arguments) {
+          this.emitExpression(arg, context)
+        }
+        context.bytecode.emitOp(Opcode.OP_call)
+        context.bytecode.emitU16(node.arguments.length)
+        context.labels.emitLabel(endLabel)
+        return
+      }
+
+      if (ts.isPropertyAccessChain(node.expression) || ts.isElementAccessChain(node.expression)) {
+        throw new Error('optional call 尚未实现')
+      }
+
+      if (ts.isPropertyAccessExpression(node.expression)) {
+        if (node.expression.expression.kind === ts.SyntaxKind.SuperKeyword) {
+          context.bytecode.emitOp(Opcode.OP_get_super)
+          emitStringLiteral(context, node.expression.name.text)
+          context.bytecode.emitOp(Opcode.OP_get_array_el)
+          for (const arg of node.arguments) {
+            this.emitExpression(arg, context)
+          }
+          context.bytecode.emitOp(Opcode.OP_call_method)
+          context.bytecode.emitU16(node.arguments.length)
+          return
+        }
+        this.emitExpression(node.expression.expression, context)
+        const atom = context.getAtom(node.expression.name.text)
+        context.bytecode.emitOp(Opcode.OP_get_field2)
+        context.bytecode.emitAtom(atom)
+        for (const arg of node.arguments) {
+          this.emitExpression(arg, context)
+        }
+        context.bytecode.emitOp(Opcode.OP_call_method)
+        context.bytecode.emitU16(node.arguments.length)
+        return
+      }
+
+      if (ts.isElementAccessExpression(node.expression)) {
+        if (node.expression.expression.kind === ts.SyntaxKind.SuperKeyword) {
+          context.bytecode.emitOp(Opcode.OP_get_super)
+          this.emitExpression(node.expression.argumentExpression, context)
+          context.bytecode.emitOp(Opcode.OP_get_array_el)
+          for (const arg of node.arguments) {
+            this.emitExpression(arg, context)
+          }
+          context.bytecode.emitOp(Opcode.OP_call_method)
+          context.bytecode.emitU16(node.arguments.length)
+          return
+        }
+        this.emitExpression(node.expression.expression, context)
+        this.emitExpression(node.expression.argumentExpression, context)
+        context.bytecode.emitOp(Opcode.OP_get_array_el2)
+        for (const arg of node.arguments) {
+          this.emitExpression(arg, context)
+        }
+        context.bytecode.emitOp(Opcode.OP_call_method)
+        context.bytecode.emitU16(node.arguments.length)
+        return
+      }
+
+      this.emitExpression(node.expression, context)
+      for (const arg of node.arguments) {
+        this.emitExpression(arg, context)
+      }
+      context.bytecode.emitOp(Opcode.OP_call)
+      context.bytecode.emitU16(node.arguments.length)
+      return
+    }
+
     if (ts.isTypeOfExpression(node)) {
       this.emitExpression(node.expression, context)
       context.bytecode.emitOp(Opcode.OP_typeof)
+      return
+    }
+
+    if (ts.isAwaitExpression(node)) {
+      this.emitExpression(node.expression, context)
+      context.bytecode.emitOp(Opcode.OP_await)
       return
     }
 
@@ -104,13 +365,62 @@ export class ExpressionEmitter {
     }
 
     if (ts.isBinaryExpression(node)) {
+      const opKind = node.operatorToken.kind
+      if (opKind === ts.SyntaxKind.AmpersandAmpersandToken) {
+        this.emitExpression(node.left, context)
+        context.bytecode.emitOp(Opcode.OP_dup)
+        const falseLabel = context.labels.emitGoto(Opcode.OP_if_false, -1)
+        context.bytecode.emitOp(Opcode.OP_drop)
+        this.emitExpression(node.right, context)
+        const endLabel = context.labels.emitGoto(Opcode.OP_goto, -1)
+        context.labels.emitLabel(falseLabel)
+        context.labels.emitLabel(endLabel)
+        return
+      }
+
+      if (opKind === ts.SyntaxKind.BarBarToken) {
+        this.emitExpression(node.left, context)
+        context.bytecode.emitOp(Opcode.OP_dup)
+        const trueLabel = context.labels.emitGoto(Opcode.OP_if_true, -1)
+        context.bytecode.emitOp(Opcode.OP_drop)
+        this.emitExpression(node.right, context)
+        const endLabel = context.labels.emitGoto(Opcode.OP_goto, -1)
+        context.labels.emitLabel(trueLabel)
+        context.labels.emitLabel(endLabel)
+        return
+      }
+
+      if (opKind === ts.SyntaxKind.QuestionQuestionToken) {
+        this.emitExpression(node.left, context)
+        context.bytecode.emitOp(Opcode.OP_dup)
+        context.bytecode.emitOp(Opcode.OP_is_undefined_or_null)
+        const rightLabel = context.labels.emitGoto(Opcode.OP_if_true, -1)
+        const endLabel = context.labels.emitGoto(Opcode.OP_goto, -1)
+        context.labels.emitLabel(rightLabel)
+        context.bytecode.emitOp(Opcode.OP_drop)
+        this.emitExpression(node.right, context)
+        context.labels.emitLabel(endLabel)
+        return
+      }
+
       this.emitExpression(node.left, context)
       this.emitExpression(node.right, context)
-      const opcode = this.getBinaryOpcode(node.operatorToken.kind)
+      const opcode = this.getBinaryOpcode(opKind)
       if (opcode === null) {
         throw new Error(`未支持的二元运算符: ${ts.SyntaxKind[node.operatorToken.kind]}`)
       }
       context.bytecode.emitOp(opcode)
+      return
+    }
+
+    if (ts.isConditionalExpression(node)) {
+      this.emitExpression(node.condition, context)
+      const falseLabel = context.labels.emitGoto(Opcode.OP_if_false, -1)
+      this.emitExpression(node.whenTrue, context)
+      const endLabel = context.labels.emitGoto(Opcode.OP_goto, -1)
+      context.labels.emitLabel(falseLabel)
+      this.emitExpression(node.whenFalse, context)
+      context.labels.emitLabel(endLabel)
       return
     }
 

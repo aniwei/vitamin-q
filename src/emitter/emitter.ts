@@ -9,6 +9,7 @@ import { InlineCacheManager } from './inline-cache'
 import { LabelManager } from './label-manager'
 import { ConstantPoolManager } from './constant-pool'
 import { ExpressionEmitter } from './expressions'
+import { ScopeManager } from './scope-manager'
 
 import { AstDispatcher } from '../ast/dispatcher'
 import { createLineColCache, getByteOffset } from '../ast/source-location'
@@ -149,6 +150,7 @@ export class EmitterContext {
   readonly labels: LabelManager
   readonly inlineCache: InlineCacheManager
   readonly constantPool: ConstantPoolManager
+  readonly scopes: ScopeManager
   readonly atomTable?: AtomTable
   private liveCode = true
   private lineColCache
@@ -157,6 +159,7 @@ export class EmitterContext {
     this.sourceFile = options.sourceFile
     this.inlineCache = options.inlineCache ?? new InlineCacheManager()
     this.constantPool = options.constantPool ?? new ConstantPoolManager()
+    this.scopes = new ScopeManager()
     this.atomTable = options.atomTable
     this.bytecode = new BytecodeEmitter({
       bytecode: options.bytecode,
@@ -170,6 +173,34 @@ export class EmitterContext {
       isLiveCode: () => this.liveCode,
     })
     this.lineColCache = createLineColCache(this.sourceFile.text)
+  }
+
+  /**
+   * 进入作用域。
+   *
+   * @source QuickJS/src/core/parser.c:2050-2085
+   * @see push_scope
+   */
+  pushScope() {
+    const scope = this.scopes.pushScope()
+    this.bytecode.emitOp(TempOpcode.OP_enter_scope)
+    this.bytecode.emitU16(scope)
+    return scope
+  }
+
+  /**
+   * 离开作用域。
+   *
+   * @source QuickJS/src/core/parser.c:2097-2120
+   * @see pop_scope
+   */
+  popScope() {
+    const scope = this.scopes.popScope()
+    if (scope >= 0) {
+      this.bytecode.emitOp(TempOpcode.OP_leave_scope)
+      this.bytecode.emitU16(scope)
+    }
+    return scope
   }
 
   /**
@@ -193,6 +224,19 @@ export class EmitterContext {
     const bytePos = getByteOffset(this.sourceFile.text, start)
     this.bytecode.emitSourcePos(bytePos)
     return getByteOffset(this.sourceFile.text, start)
+  }
+
+  /**
+   * 获取/创建原子。
+   *
+   * @source QuickJS/src/core/string-utils.c:577-590
+   * @see __JS_NewAtomInit
+   */
+  getAtom(name: string): JSAtom {
+    if (!this.atomTable) {
+      throw new Error('AtomTable 未注入，无法创建原子')
+    }
+    return this.atomTable.getOrAdd(name)
   }
 
   /**
@@ -264,9 +308,11 @@ export class BytecodeCompiler {
   private registerCoreHandlers() {
     this.dispatcher.registerStatement(ts.SyntaxKind.Block, (node, context) => {
       const block = node as ts.Block
+      const scope = context.pushScope()
       for (const stmt of block.statements) {
         this.dispatcher.dispatch(stmt, context)
       }
+      context.popScope()
     })
 
     this.dispatcher.registerStatement(ts.SyntaxKind.EmptyStatement, () => {
@@ -288,9 +334,19 @@ export class BytecodeCompiler {
       ts.SyntaxKind.TrueKeyword,
       ts.SyntaxKind.FalseKeyword,
       ts.SyntaxKind.NullKeyword,
+      ts.SyntaxKind.ThisKeyword,
+      ts.SyntaxKind.Identifier,
       ts.SyntaxKind.TypeOfExpression,
       ts.SyntaxKind.PrefixUnaryExpression,
       ts.SyntaxKind.BinaryExpression,
+      ts.SyntaxKind.PropertyAccessExpression,
+      ts.SyntaxKind.ElementAccessExpression,
+      ts.SyntaxKind.CallExpression,
+      ts.SyntaxKind.NewExpression,
+      ts.SyntaxKind.TemplateExpression,
+      ts.SyntaxKind.ConditionalExpression,
+      ts.SyntaxKind.MetaProperty,
+      ts.SyntaxKind.AwaitExpression,
     ]
 
     for (const kind of expressionKinds) {
