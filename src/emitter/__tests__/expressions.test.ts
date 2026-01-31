@@ -931,6 +931,7 @@ test('emitter: object literal with computed name', () => {
     (key >>> 8) & 0xff,
     (key >>> 16) & 0xff,
     (key >>> 24) & 0xff,
+    Opcode.OP_to_propkey,
     Opcode.OP_push_i32, 1, 0, 0, 0,
     Opcode.OP_define_array_el,
     Opcode.OP_drop,

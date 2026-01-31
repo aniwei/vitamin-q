@@ -52,6 +52,8 @@ const normalizeOpcodes = (ops: string[], options: { ignoreReturn?: boolean } = {
     'line_num',
     'label',
     'undefined',
+    'enter_scope',
+    'leave_scope',
     'check_define_var',
     'define_var',
     'get_loc',
@@ -102,14 +104,23 @@ const normalizeOpcodes = (ops: string[], options: { ignoreReturn?: boolean } = {
     .map(op => shortMap[op] ?? op)
     .filter(op => !ignore.has(op))
 
-  if (options.ignoreReturn && normalized.length > 0) {
-    const last = normalized[normalized.length - 1]
+  const filtered: string[] = []
+  for (let i = 0; i < normalized.length; i++) {
+    const op = normalized[i]
+    if (op === 'put_var' && (normalized[i - 1] === 'catch' || normalized[i + 1] === 'catch')) {
+      continue
+    }
+    filtered.push(op)
+  }
+
+  if (options.ignoreReturn && filtered.length > 0) {
+    const last = filtered[filtered.length - 1]
     if (last === 'return' || last === 'return_undef') {
-      return normalized.slice(0, -1)
+      return filtered.slice(0, -1)
     }
   }
 
-  return normalized
+  return filtered
 }
 
 const compileEmitterOpcodes = (source: string): string[] => {
@@ -140,4 +151,75 @@ test('statements: if-else aligns with wasm', async () => {
 
 test('statements: throw aligns with wasm', async () => {
   await assertStatementAligned('throw a;')
+})
+
+test('statements: debugger aligns with wasm', async () => {
+  await assertStatementAligned('debugger;', { ignoreReturn: true })
+})
+
+test('statements: with aligns with wasm', async () => {
+  await assertStatementAligned('with (obj) { x = 1; }', { ignoreReturn: true })
+})
+
+test('statements: while loop aligns with wasm', async () => {
+  await assertStatementAligned('while (a) { b; }', { ignoreReturn: true })
+})
+
+test('statements: do-while loop aligns with wasm', async () => {
+  await assertStatementAligned('do { b; } while (a);', { ignoreReturn: true })
+})
+
+test('statements: for loop aligns with wasm', async () => {
+  await assertStatementAligned('for (i = 0; i < 1; i = i + 1) { b; }', { ignoreReturn: true })
+})
+
+test('statements: break aligns with wasm', async () => {
+  await assertStatementAligned('while (a) { b; if (c) break; }', { ignoreReturn: true })
+})
+
+test('statements: continue aligns with wasm', async () => {
+  await assertStatementAligned('while (a) { b; if (c) continue; d; }', { ignoreReturn: true })
+})
+
+test('statements: for-in aligns with wasm', async () => {
+  await assertStatementAligned('for (key in obj) { body; }', { ignoreReturn: true })
+})
+
+test('statements: for-of aligns with wasm', async () => {
+  await assertStatementAligned('for (item of iter) { body; }', { ignoreReturn: true })
+})
+
+test('statements: switch aligns with wasm', async () => {
+  await assertStatementAligned(`
+    switch (x) {
+      case 1:
+        a;
+        break;
+      case 2:
+        b;
+        break;
+      default:
+        c;
+    }
+  `, { ignoreReturn: true })
+})
+
+test('statements: try-catch aligns with wasm', async () => {
+  await assertStatementAligned(`
+    try {
+      a;
+    } catch (e) {
+      b;
+    }
+  `, { ignoreReturn: true })
+})
+
+test('statements: try-finally aligns with wasm', async () => {
+  await assertStatementAligned(`
+    try {
+      a;
+    } finally {
+      b;
+    }
+  `, { ignoreReturn: true })
 })

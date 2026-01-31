@@ -1,6 +1,6 @@
 import ts from 'typescript'
 
-import { TempOpcode } from '../env'
+import { JS_ATOM__with_, TempOpcode } from '../env'
 import type { JSAtom } from '../env'
 
 import { BytecodeBuffer } from './bytecode-buffer'
@@ -241,6 +241,30 @@ export class EmitterContext {
   }
 
   /**
+   * 查找最近的 with 作用域变量索引。
+   */
+  findWithVarIndex(): number {
+    let scopeLevel = this.scopes.scopeLevel
+    while (scopeLevel >= 0) {
+      let cursor = this.scopes.scopes[scopeLevel].first
+      while (cursor >= 0) {
+        const vd = this.scopes.vars[cursor]
+        if (vd.varName === JS_ATOM__with_) {
+          return cursor
+        }
+        if (vd.scopeLevel !== scopeLevel) break
+        cursor = vd.scopeNext
+      }
+      scopeLevel = this.scopes.scopes[scopeLevel].parent
+    }
+    return -1
+  }
+
+  hasWithScope(): boolean {
+    return this.findWithVarIndex() >= 0
+  }
+
+  /**
    * 获取行列缓存（用于测试或调试）。
    *
    * @source QuickJS/src/core/parser.c:151-193
@@ -369,6 +393,90 @@ export class BytecodeCompiler {
       )
     })
 
+    this.dispatcher.registerStatement(ts.SyntaxKind.TryStatement, (node, context) => {
+      this.statementEmitter.emitTryStatement(
+        node as ts.TryStatement,
+        context,
+        (expr, ctx) => this.expressionEmitter.emitExpression(expr, ctx),
+        (stmt, ctx) => this.dispatcher.dispatch(stmt, ctx),
+      )
+    })
+
+    this.dispatcher.registerStatement(ts.SyntaxKind.DebuggerStatement, (node, context) => {
+      this.statementEmitter.emitDebuggerStatement(node as ts.DebuggerStatement, context)
+    })
+
+    this.dispatcher.registerStatement(ts.SyntaxKind.WithStatement, (node, context) => {
+      this.statementEmitter.emitWithStatement(
+        node as ts.WithStatement,
+        context,
+        (expr, ctx) => this.expressionEmitter.emitExpression(expr, ctx),
+        (stmt, ctx) => this.dispatcher.dispatch(stmt, ctx),
+      )
+    })
+
+    this.dispatcher.registerStatement(ts.SyntaxKind.WhileStatement, (node, context) => {
+      this.statementEmitter.emitWhileStatement(
+        node as ts.WhileStatement,
+        context,
+        (expr, ctx) => this.expressionEmitter.emitExpression(expr, ctx),
+        (stmt, ctx) => this.dispatcher.dispatch(stmt, ctx),
+      )
+    })
+
+    this.dispatcher.registerStatement(ts.SyntaxKind.DoStatement, (node, context) => {
+      this.statementEmitter.emitDoWhileStatement(
+        node as ts.DoStatement,
+        context,
+        (expr, ctx) => this.expressionEmitter.emitExpression(expr, ctx),
+        (stmt, ctx) => this.dispatcher.dispatch(stmt, ctx),
+      )
+    })
+
+    this.dispatcher.registerStatement(ts.SyntaxKind.ForStatement, (node, context) => {
+      this.statementEmitter.emitForStatement(
+        node as ts.ForStatement,
+        context,
+        (expr, ctx) => this.expressionEmitter.emitExpression(expr, ctx),
+        (stmt, ctx) => this.dispatcher.dispatch(stmt, ctx),
+      )
+    })
+
+    this.dispatcher.registerStatement(ts.SyntaxKind.ForInStatement, (node, context) => {
+      this.statementEmitter.emitForInStatement(
+        node as ts.ForInStatement,
+        context,
+        (expr, ctx) => this.expressionEmitter.emitExpression(expr, ctx),
+        (stmt, ctx) => this.dispatcher.dispatch(stmt, ctx),
+      )
+    })
+
+    this.dispatcher.registerStatement(ts.SyntaxKind.ForOfStatement, (node, context) => {
+      this.statementEmitter.emitForOfStatement(
+        node as ts.ForOfStatement,
+        context,
+        (expr, ctx) => this.expressionEmitter.emitExpression(expr, ctx),
+        (stmt, ctx) => this.dispatcher.dispatch(stmt, ctx),
+      )
+    })
+
+    this.dispatcher.registerStatement(ts.SyntaxKind.SwitchStatement, (node, context) => {
+      this.statementEmitter.emitSwitchStatement(
+        node as ts.SwitchStatement,
+        context,
+        (expr, ctx) => this.expressionEmitter.emitExpression(expr, ctx),
+        (stmt, ctx) => this.dispatcher.dispatch(stmt, ctx),
+      )
+    })
+
+    this.dispatcher.registerStatement(ts.SyntaxKind.BreakStatement, (node, context) => {
+      this.statementEmitter.emitBreakStatement(node as ts.BreakStatement, context)
+    })
+
+    this.dispatcher.registerStatement(ts.SyntaxKind.ContinueStatement, (node, context) => {
+      this.statementEmitter.emitContinueStatement(node as ts.ContinueStatement, context)
+    })
+
     const expressionKinds: ts.SyntaxKind[] = [
       ts.SyntaxKind.ParenthesizedExpression,
       ts.SyntaxKind.NumericLiteral,
@@ -393,6 +501,7 @@ export class BytecodeCompiler {
       ts.SyntaxKind.AwaitExpression,
       ts.SyntaxKind.ArrayLiteralExpression,
       ts.SyntaxKind.ObjectLiteralExpression,
+      ts.SyntaxKind.RegularExpressionLiteral,
     ]
 
     for (const kind of expressionKinds) {

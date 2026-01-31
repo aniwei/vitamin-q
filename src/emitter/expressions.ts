@@ -5,6 +5,7 @@ import type { JSAtom } from '../env'
 
 import { AssignmentEmitter } from './assignment'
 import { LiteralEmitter } from './literals'
+import { emitRegexpLiteral } from './regexp'
 import type { EmitterContext } from './emitter'
 
 const isInt32 = (value: number): boolean => Number.isInteger(value) && value >= -2147483648 && value <= 2147483647
@@ -83,6 +84,11 @@ export class ExpressionEmitter {
       return
     }
 
+    if (ts.isRegularExpressionLiteral(node)) {
+      emitRegexpLiteral(node.text, context)
+      return
+    }
+
     if (node.kind === ts.SyntaxKind.TrueKeyword) {
       context.bytecode.emitOp(Opcode.OP_push_true)
       return
@@ -118,6 +124,20 @@ export class ExpressionEmitter {
           context.bytecode.emitU16(localIdx)
           return
         }
+      }
+      const withIdx = context.findWithVarIndex()
+      if (withIdx >= 0) {
+        const label = context.labels.newLabel()
+        context.bytecode.emitOp(Opcode.OP_get_loc)
+        context.bytecode.emitU16(withIdx)
+        context.bytecode.emitOp(Opcode.OP_with_get_var)
+        context.bytecode.emitAtom(atom)
+        context.bytecode.emitU32(label)
+        context.bytecode.emitU8(1)
+        context.bytecode.emitOp(Opcode.OP_get_var)
+        context.bytecode.emitAtom(atom)
+        context.labels.emitLabel(label)
+        return
       }
       context.bytecode.emitOp(Opcode.OP_get_var)
       context.bytecode.emitAtom(atom)

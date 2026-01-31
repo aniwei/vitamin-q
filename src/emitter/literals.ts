@@ -70,6 +70,7 @@ export class LiteralEmitter {
       if (ts.isPropertyAssignment(prop)) {
         if (ts.isComputedPropertyName(prop.name)) {
           emitExpression(prop.name.expression, context)
+          context.bytecode.emitOp(Opcode.OP_to_propkey)
           emitExpression(prop.initializer, context)
           context.bytecode.emitOp(Opcode.OP_define_array_el)
           context.bytecode.emitOp(Opcode.OP_drop)

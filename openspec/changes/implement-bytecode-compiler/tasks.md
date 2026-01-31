@@ -160,7 +160,7 @@
   - 参考 `docs/quickjs/bytecode-functions/emit-functions.md`
   - **标注 C 源码**: 每个 emit 函数对应 quickjs.c 中的行号
 
-- [ ] 3.5 实现表达式发射 (`src/emitter/expressions.ts`)
+- [x] 3.5 实现表达式发射 (`src/emitter/expressions.ts`)
   - 字面量发射（NumericLiteral, StringLiteral, BigIntLiteral 等）
   - emit_push_const: 常量推送（支持 as_atom 优化）
   - 运算符发射（BinaryExpression, UnaryExpression）
@@ -176,21 +176,21 @@
   - 参考 `docs/quickjs/syntax-to-bytecode/expressions.md`
   - **标注 C 源码**: 对应 js_parse_expr, js_parse_unary, js_parse_postfix_expr 等函数
 
-- [ ] 3.5a 实现赋值表达式发射 (`src/emitter/assignment.ts`)
+- [x] 3.5a 实现赋值表达式发射 (`src/emitter/assignment.ts`)
   - js_parse_assign_expr2 对应逻辑
   - 复合赋值运算符（+=, -=, *=, /= 等）
   - 逻辑赋值运算符（&&=, ||=, ??=）
   - 解构赋值发射
   - **标注 C 源码**: `@source parser.c` 中的 js_parse_assign_expr2
 
-- [ ] 3.5b 实现对象/数组字面量发射 (`src/emitter/literals.ts`)
+- [x] 3.5b 实现对象/数组字面量发射 (`src/emitter/literals.ts`)
   - js_parse_object_literal: 对象字面量
   - js_parse_array_literal: 数组字面量
   - 计算属性名处理
   - getter/setter 方法处理
   - **标注 C 源码**: `@source parser.c` 中的 js_parse_object_literal, js_parse_array_literal
 
-- [ ] 3.6 实现语句发射 (`src/emitter/statements.ts`)
+- [x] 3.6 实现语句发射 (`src/emitter/statements.ts`)
   - 变量声明发射（VariableStatement: var/let/const）
   - 控制流发射（IfStatement, ForStatement, WhileStatement, DoStatement）
   - for-in/for-of 发射
@@ -204,7 +204,7 @@
   - 参考 `docs/quickjs/syntax-to-bytecode/statements.md`
   - **标注 C 源码**: 对应 js_parse_statement_or_decl 等函数
 
-- [ ] 3.6a 实现解构模式发射 (`src/emitter/destructuring.ts`)
+- [x] 3.6a 实现解构模式发射 (`src/emitter/destructuring.ts`)
   - 数组解构发射
   - 对象解构发射
   - 嵌套解构
@@ -263,13 +263,13 @@
 
 ## 3a. 正则表达式处理模块
 
-- [ ] 3a.1 实现正则表达式解析 (`src/emitter/regexp.ts`)
+- [x] 3a.1 实现正则表达式解析 (`src/emitter/regexp.ts`)
   - js_parse_regexp: 正则表达式字面量解析
   - 正则表达式标志处理
   - OP_regexp 操作码发射
   - **标注 C 源码**: `@source parser.c` 中的 js_parse_regexp
 
-- [ ] 3a.2 正则表达式单元测试
+- [x] 3a.2 正则表达式单元测试
   - 正则字面量编译测试
   - 标志解析测试
 

@@ -2,6 +2,7 @@ import ts from 'typescript'
 
 import { Opcode } from '../env'
 import type { EmitterContext } from './emitter'
+import { DestructuringEmitter } from './destructuring'
 
 export type ExpressionEmitterFn = (node: ts.Expression, context: EmitterContext) => void
 
@@ -12,6 +13,8 @@ export type ExpressionEmitterFn = (node: ts.Expression, context: EmitterContext)
  * @see js_parse_assign_expr2
  */
 export class AssignmentEmitter {
+  private destructuringEmitter = new DestructuringEmitter()
+
   emitAssignment(node: ts.BinaryExpression, context: EmitterContext, emitExpression: ExpressionEmitterFn) {
     const opKind = node.operatorToken.kind
     if (opKind === ts.SyntaxKind.EqualsToken) {
@@ -39,7 +42,30 @@ export class AssignmentEmitter {
     context: EmitterContext,
     emitExpression: ExpressionEmitterFn,
   ) {
+    if (ts.isObjectLiteralExpression(left) || ts.isArrayLiteralExpression(left)) {
+      this.destructuringEmitter.emitAssignmentPattern(left, right, context, emitExpression)
+      return
+    }
+
     if (ts.isIdentifier(left)) {
+      const withIdx = context.findWithVarIndex()
+      if (withIdx >= 0) {
+        const atom = context.getAtom(left.text)
+        context.bytecode.emitOp(Opcode.OP_get_loc)
+        context.bytecode.emitU16(withIdx)
+        const refLabel = context.labels.newLabel()
+        context.bytecode.emitOp(Opcode.OP_with_make_ref)
+        context.bytecode.emitAtom(atom)
+        context.bytecode.emitU32(refLabel)
+        context.bytecode.emitU8(1)
+        context.bytecode.emitOp(Opcode.OP_make_var_ref)
+        context.bytecode.emitAtom(atom)
+        context.labels.emitLabel(refLabel)
+        emitExpression(right, context)
+        context.bytecode.emitOp(Opcode.OP_insert3)
+        context.bytecode.emitOp(Opcode.OP_put_ref_value)
+        return
+      }
       emitExpression(right, context)
       context.bytecode.emitOp(Opcode.OP_dup)
       context.bytecode.emitOp(Opcode.OP_put_var)
