@@ -3,6 +3,8 @@ import ts from 'typescript'
 import { Opcode, OPSpecialObjectEnum, TempOpcode } from '../env'
 import type { JSAtom } from '../env'
 
+import { AssignmentEmitter } from './assignment'
+import { LiteralEmitter } from './literals'
 import type { EmitterContext } from './emitter'
 
 const isInt32 = (value: number): boolean => Number.isInteger(value) && value >= -2147483648 && value <= 2147483647
@@ -35,6 +37,9 @@ const emitStringLiteral = (context: EmitterContext, value: string) => {
  * @see js_parse_expr
  */
 export class ExpressionEmitter {
+  private assignmentEmitter = new AssignmentEmitter()
+  private literalEmitter = new LiteralEmitter()
+
   /**
    * 发射表达式。
    *
@@ -55,6 +60,16 @@ export class ExpressionEmitter {
       } else {
         emitPushConst(context, value)
       }
+      return
+    }
+
+    if (ts.isArrayLiteralExpression(node)) {
+      this.literalEmitter.emitArrayLiteral(node, context, this.emitExpression.bind(this))
+      return
+    }
+
+    if (ts.isObjectLiteralExpression(node)) {
+      this.literalEmitter.emitObjectLiteral(node, context, this.emitExpression.bind(this))
       return
     }
 
@@ -366,6 +381,10 @@ export class ExpressionEmitter {
 
     if (ts.isBinaryExpression(node)) {
       const opKind = node.operatorToken.kind
+      if (this.isAssignmentOperator(opKind)) {
+        this.assignmentEmitter.emitAssignment(node, context, this.emitExpression.bind(this))
+        return
+      }
       if (opKind === ts.SyntaxKind.AmpersandAmpersandToken) {
         this.emitExpression(node.left, context)
         context.bytecode.emitOp(Opcode.OP_dup)
@@ -425,6 +444,30 @@ export class ExpressionEmitter {
     }
 
     throw new Error(`未支持表达式: ${ts.SyntaxKind[node.kind]}`)
+  }
+
+  private isAssignmentOperator(kind: ts.SyntaxKind): boolean {
+    switch (kind) {
+      case ts.SyntaxKind.EqualsToken:
+      case ts.SyntaxKind.PlusEqualsToken:
+      case ts.SyntaxKind.MinusEqualsToken:
+      case ts.SyntaxKind.AsteriskEqualsToken:
+      case ts.SyntaxKind.SlashEqualsToken:
+      case ts.SyntaxKind.PercentEqualsToken:
+      case ts.SyntaxKind.AsteriskAsteriskEqualsToken:
+      case ts.SyntaxKind.LessThanLessThanEqualsToken:
+      case ts.SyntaxKind.GreaterThanGreaterThanEqualsToken:
+      case ts.SyntaxKind.GreaterThanGreaterThanGreaterThanEqualsToken:
+      case ts.SyntaxKind.AmpersandEqualsToken:
+      case ts.SyntaxKind.BarEqualsToken:
+      case ts.SyntaxKind.CaretEqualsToken:
+      case ts.SyntaxKind.AmpersandAmpersandEqualsToken:
+      case ts.SyntaxKind.BarBarEqualsToken:
+      case ts.SyntaxKind.QuestionQuestionEqualsToken:
+        return true
+      default:
+        return false
+    }
   }
 
   private getBinaryOpcode(kind: ts.SyntaxKind): Opcode | null {

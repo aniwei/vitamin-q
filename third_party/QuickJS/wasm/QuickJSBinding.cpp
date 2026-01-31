@@ -1,6 +1,7 @@
 #include <emscripten.h>
 #include <string>
 #include <stdexcept>
+#include <map>
 #include "QuickJS/extension/taro_js_bytecode.h"
 #include "QuickJS/extension/taro_js_types.h"
 #include "QuickJSBinding.h"
@@ -727,6 +728,38 @@ namespace quickjs {
       return column;
     }
 
+    struct TestLabelSlot {
+      int32_t refCount;
+      int32_t pos;
+      int32_t pos2;
+      int32_t addr;
+      int32_t firstReloc;
+    };
+
+    static int test_new_label(std::vector<TestLabelSlot>& slots) {
+      const int label = static_cast<int>(slots.size());
+      slots.push_back(TestLabelSlot{0, -1, -1, -1, -1});
+      return label;
+    }
+
+    static int test_emit_label(std::vector<TestLabelSlot>& slots, int label, uint32_t& size) {
+      if (label < 0) return -1;
+      size += 1;
+      size += 4;
+      slots[label].pos = static_cast<int32_t>(size);
+      return static_cast<int>(size - 4);
+    }
+
+    static int test_emit_goto(std::vector<TestLabelSlot>& slots, int label, uint32_t& size) {
+      if (label < 0) {
+        label = test_new_label(slots);
+      }
+      size += 1;
+      size += 4;
+      slots[label].refCount += 1;
+      return label;
+    }
+
     LineCol QuickJSBinding::getLineCol(std::string input, uint32_t position) {
       const uint32_t pos = std::min<uint32_t>(position, input.size());
       return get_line_col_range(input, 0, pos);
@@ -761,6 +794,139 @@ namespace quickjs {
 
       cache.ptr = pos;
       return cache;
+    }
+
+    ConstantPoolResult QuickJSBinding::getConstantPoolAddResult(
+      std::vector<int32_t> values
+    ) {
+      ConstantPoolResult out{};
+      std::map<int32_t, int32_t> indexByValue;
+      for (const auto &value : values) {
+        auto it = indexByValue.find(value);
+        if (it != indexByValue.end()) {
+          out.indices.push_back(it->second);
+          continue;
+        }
+        const int32_t index = static_cast<int32_t>(out.count);
+        indexByValue[value] = index;
+        out.indices.push_back(index);
+        out.count += 1;
+      }
+      return out;
+    }
+
+    InlineCacheResult QuickJSBinding::getInlineCacheAddResult(
+      std::vector<int32_t> atoms
+    ) {
+      InlineCacheResult out{};
+      std::map<int32_t, int32_t> indexByAtom;
+      for (const auto &atom : atoms) {
+        auto it = indexByAtom.find(atom);
+        if (it != indexByAtom.end()) {
+          out.results.push_back(it->second);
+          continue;
+        }
+        const int32_t index = static_cast<int32_t>(out.count);
+        indexByAtom[atom] = index;
+        out.results.push_back(index);
+        out.count += 1;
+      }
+      return out;
+    }
+
+    LabelManagerResult QuickJSBinding::getLabelManagerScenario() {
+      LabelManagerResult out{};
+      std::vector<TestLabelSlot> slots;
+      uint32_t size = 0;
+
+      int labelA = test_new_label(slots);
+      int labelB = test_emit_goto(slots, -1, size);
+      test_emit_label(slots, labelA, size);
+      test_emit_goto(slots, labelA, size);
+      test_emit_goto(slots, labelB, size);
+      test_emit_label(slots, labelB, size);
+
+      out.bytecodeSize = size;
+      out.slots.reserve(slots.size());
+      for (const auto &slot : slots) {
+        out.slots.push_back(LabelSlotInfo{
+          slot.refCount,
+          slot.pos,
+          slot.pos2,
+          slot.addr,
+          slot.firstReloc,
+        });
+      }
+      return out;
+    }
+
+    ScopeManagerSnapshot QuickJSBinding::getScopeManagerScenario(
+      uint32_t atomA,
+      uint32_t atomB,
+      uint32_t atomC,
+      uint8_t kindA,
+      uint8_t kindB,
+      uint8_t kindC
+    ) {
+      ScopeManagerSnapshot out{};
+      std::vector<ScopeScopeSnapshot> scopes;
+      std::vector<ScopeVarSnapshot> vars;
+      int32_t scopeLevel = -1;
+      int32_t scopeFirst = -1;
+
+      auto push_scope = [&](void) {
+        const int32_t scope = static_cast<int32_t>(scopes.size());
+        scopes.push_back(ScopeScopeSnapshot{scopeLevel, scopeFirst});
+        scopeLevel = scope;
+      };
+
+      auto add_var = [&](uint32_t name) {
+        const int32_t idx = static_cast<int32_t>(vars.size());
+        vars.push_back(ScopeVarSnapshot{ name, 0, -1, 0 });
+        return idx;
+      };
+
+      auto add_scope_var = [&](uint32_t name, uint8_t kind) {
+        const int32_t idx = add_var(name);
+        vars[idx].varKind = kind;
+        vars[idx].scopeLevel = scopeLevel;
+        vars[idx].scopeNext = scopeFirst;
+        if (scopeLevel >= 0) {
+          scopes[scopeLevel].first = idx;
+        }
+        scopeFirst = idx;
+        return idx;
+      };
+
+      auto get_first_lexical_var = [&](int32_t scope) {
+        int32_t cursor = scope;
+        while (cursor >= 0) {
+          const int32_t first = scopes[cursor].first;
+          if (first >= 0) return first;
+          cursor = scopes[cursor].parent;
+        }
+        return static_cast<int32_t>(-1);
+      };
+
+      auto pop_scope = [&](void) {
+        if (scopeLevel < 0) return;
+        const int32_t current = scopeLevel;
+        scopeLevel = scopes[current].parent;
+        scopeFirst = get_first_lexical_var(scopeLevel);
+      };
+
+      push_scope();
+      add_scope_var(atomA, kindA);
+      push_scope();
+      add_scope_var(atomB, kindB);
+      pop_scope();
+      add_scope_var(atomC, kindC);
+
+      out.vars = vars;
+      out.scopes = scopes;
+      out.scopeLevel = scopeLevel;
+      out.scopeFirst = scopeFirst;
+      return out;
     }
 
   #undef ADD_FIELD

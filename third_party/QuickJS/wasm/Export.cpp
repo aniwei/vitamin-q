@@ -8,6 +8,7 @@ using namespace quickjs;
 
 EMSCRIPTEN_BINDINGS(quickjs_wasm) {
   register_vector<uint8_t>("Uint8Array");
+  register_vector<int32_t>("Int32Array");
   register_vector<std::string>("StringArray");
   register_vector<Op>("OpArray");
   register_vector<Atom>("AtomArray");
@@ -21,6 +22,9 @@ EMSCRIPTEN_BINDINGS(quickjs_wasm) {
   register_vector<ParseExportEnumEntry>("ParseExportEnumArray");
   register_vector<VarKindEnumEntry>("VarKindEnumArray");
   register_vector<LayoutField>("LayoutFieldArray");
+  register_vector<LabelSlotInfo>("LabelSlotInfoArray");
+  register_vector<ScopeVarSnapshot>("ScopeVarSnapshotArray");
+  register_vector<ScopeScopeSnapshot>("ScopeScopeSnapshotArray");
 
   class_<LineCol>("LineCol")
     .constructor<>()
@@ -114,6 +118,48 @@ EMSCRIPTEN_BINDINGS(quickjs_wasm) {
     .property("offset", &LayoutField::offset)
     .property("size", &LayoutField::size);
 
+  class_<ConstantPoolResult>("ConstantPoolResult")
+    .constructor<>()
+    .property("indices", &ConstantPoolResult::indices)
+    .property("count", &ConstantPoolResult::count);
+
+  class_<InlineCacheResult>("InlineCacheResult")
+    .constructor<>()
+    .property("results", &InlineCacheResult::results)
+    .property("count", &InlineCacheResult::count);
+
+  class_<LabelSlotInfo>("LabelSlotInfo")
+    .constructor<>()
+    .property("refCount", &LabelSlotInfo::refCount)
+    .property("pos", &LabelSlotInfo::pos)
+    .property("pos2", &LabelSlotInfo::pos2)
+    .property("addr", &LabelSlotInfo::addr)
+    .property("firstReloc", &LabelSlotInfo::firstReloc);
+
+  class_<LabelManagerResult>("LabelManagerResult")
+    .constructor<>()
+    .property("slots", &LabelManagerResult::slots)
+    .property("bytecodeSize", &LabelManagerResult::bytecodeSize);
+
+  class_<ScopeVarSnapshot>("ScopeVarSnapshot")
+    .constructor<>()
+    .property("varName", &ScopeVarSnapshot::varName)
+    .property("scopeLevel", &ScopeVarSnapshot::scopeLevel)
+    .property("scopeNext", &ScopeVarSnapshot::scopeNext)
+    .property("varKind", &ScopeVarSnapshot::varKind);
+
+  class_<ScopeScopeSnapshot>("ScopeScopeSnapshot")
+    .constructor<>()
+    .property("parent", &ScopeScopeSnapshot::parent)
+    .property("first", &ScopeScopeSnapshot::first);
+
+  class_<ScopeManagerSnapshot>("ScopeManagerSnapshot")
+    .constructor<>()
+    .property("vars", &ScopeManagerSnapshot::vars)
+    .property("scopes", &ScopeManagerSnapshot::scopes)
+    .property("scopeLevel", &ScopeManagerSnapshot::scopeLevel)
+    .property("scopeFirst", &ScopeManagerSnapshot::scopeFirst);
+
   class_<QuickJSBinding>("QuickJSBinding")
     .constructor<>()
     .class_function("compile", &QuickJSBinding::compile)
@@ -157,5 +203,9 @@ EMSCRIPTEN_BINDINGS(quickjs_wasm) {
     .class_function("getReqModuleEntryLayout", &QuickJSBinding::getReqModuleEntryLayout)
     .class_function("getLineCol", &QuickJSBinding::getLineCol)
     .class_function("getLineColCached", &QuickJSBinding::getLineColCached)
+    .class_function("getConstantPoolAddResult", &QuickJSBinding::getConstantPoolAddResult)
+    .class_function("getInlineCacheAddResult", &QuickJSBinding::getInlineCacheAddResult)
+    .class_function("getLabelManagerScenario", &QuickJSBinding::getLabelManagerScenario)
+    .class_function("getScopeManagerScenario", &QuickJSBinding::getScopeManagerScenario)
     .smart_ptr<std::shared_ptr<QuickJSBinding>>("shared_ptr<QuickJSBinding>");
 }

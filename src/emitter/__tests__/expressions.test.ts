@@ -5,7 +5,7 @@ import ts from 'typescript'
 import { parseSource } from '../../ast/parser'
 import { BytecodeCompiler } from '../emitter'
 import { AtomTable } from '../atom-table'
-import { Opcode, TempOpcode, OPSpecialObjectEnum } from '../../env'
+import { COPY_DATA_PROPERTIES_OPERAND_SPREAD, Opcode, TempOpcode, OPSpecialObjectEnum } from '../../env'
 
 const compileExpression = (code: string, atomTable?: AtomTable) => {
   const source = parseSource(code, { fileName: 'expr.ts' })
@@ -527,6 +527,497 @@ test('emitter: optional call on value', () => {
     1, 0,
     TempOpcode.OP_label,
     0, 0, 0, 0,
+  ]))
+})
+
+test('emitter: assignment emits OP_put_var with value kept', () => {
+  const atoms = new AtomTable()
+  const name = atoms.getOrAdd('a')
+  const bytes = compileExpression('a = 1;', atoms)
+  assert.deepEqual(Array.from(bytes), withLineInfo([
+    Opcode.OP_push_i32, 1, 0, 0, 0,
+    Opcode.OP_dup,
+    Opcode.OP_put_var,
+    name & 0xff,
+    (name >>> 8) & 0xff,
+    (name >>> 16) & 0xff,
+    (name >>> 24) & 0xff,
+  ]))
+})
+
+test('emitter: compound assignment on identifier', () => {
+  const atoms = new AtomTable()
+  const name = atoms.getOrAdd('a')
+  const bytes = compileExpression('a += 2;', atoms)
+  assert.deepEqual(Array.from(bytes), withLineInfo([
+    Opcode.OP_get_var,
+    name & 0xff,
+    (name >>> 8) & 0xff,
+    (name >>> 16) & 0xff,
+    (name >>> 24) & 0xff,
+    Opcode.OP_push_i32, 2, 0, 0, 0,
+    Opcode.OP_add,
+    Opcode.OP_dup,
+    Opcode.OP_put_var,
+    name & 0xff,
+    (name >>> 8) & 0xff,
+    (name >>> 16) & 0xff,
+    (name >>> 24) & 0xff,
+  ]))
+})
+
+test('emitter: assignment on property', () => {
+  const atoms = new AtomTable()
+  const obj = atoms.getOrAdd('obj')
+  const prop = atoms.getOrAdd('value')
+  const bytes = compileExpression('obj.value = 1;', atoms)
+  assert.deepEqual(Array.from(bytes), withLineInfo([
+    Opcode.OP_get_var,
+    obj & 0xff,
+    (obj >>> 8) & 0xff,
+    (obj >>> 16) & 0xff,
+    (obj >>> 24) & 0xff,
+    Opcode.OP_push_i32, 1, 0, 0, 0,
+    Opcode.OP_insert2,
+    Opcode.OP_put_field,
+    prop & 0xff,
+    (prop >>> 8) & 0xff,
+    (prop >>> 16) & 0xff,
+    (prop >>> 24) & 0xff,
+  ]))
+})
+
+test('emitter: compound assignment on property', () => {
+  const atoms = new AtomTable()
+  const obj = atoms.getOrAdd('obj')
+  const prop = atoms.getOrAdd('value')
+  const bytes = compileExpression('obj.value += 1;', atoms)
+  assert.deepEqual(Array.from(bytes), withLineInfo([
+    Opcode.OP_get_var,
+    obj & 0xff,
+    (obj >>> 8) & 0xff,
+    (obj >>> 16) & 0xff,
+    (obj >>> 24) & 0xff,
+    Opcode.OP_get_field2,
+    prop & 0xff,
+    (prop >>> 8) & 0xff,
+    (prop >>> 16) & 0xff,
+    (prop >>> 24) & 0xff,
+    Opcode.OP_push_i32, 1, 0, 0, 0,
+    Opcode.OP_add,
+    Opcode.OP_insert2,
+    Opcode.OP_put_field,
+    prop & 0xff,
+    (prop >>> 8) & 0xff,
+    (prop >>> 16) & 0xff,
+    (prop >>> 24) & 0xff,
+  ]))
+})
+
+test('emitter: assignment on element', () => {
+  const atoms = new AtomTable()
+  const obj = atoms.getOrAdd('obj')
+  const key = atoms.getOrAdd('key')
+  const bytes = compileExpression('obj[key] = 1;', atoms)
+  assert.deepEqual(Array.from(bytes), withLineInfo([
+    Opcode.OP_get_var,
+    obj & 0xff,
+    (obj >>> 8) & 0xff,
+    (obj >>> 16) & 0xff,
+    (obj >>> 24) & 0xff,
+    Opcode.OP_get_var,
+    key & 0xff,
+    (key >>> 8) & 0xff,
+    (key >>> 16) & 0xff,
+    (key >>> 24) & 0xff,
+    Opcode.OP_push_i32, 1, 0, 0, 0,
+    Opcode.OP_insert3,
+    Opcode.OP_put_array_el,
+  ]))
+})
+
+test('emitter: compound assignment on element', () => {
+  const atoms = new AtomTable()
+  const obj = atoms.getOrAdd('obj')
+  const key = atoms.getOrAdd('key')
+  const bytes = compileExpression('obj[key] += 1;', atoms)
+  assert.deepEqual(Array.from(bytes), withLineInfo([
+    Opcode.OP_get_var,
+    obj & 0xff,
+    (obj >>> 8) & 0xff,
+    (obj >>> 16) & 0xff,
+    (obj >>> 24) & 0xff,
+    Opcode.OP_get_var,
+    key & 0xff,
+    (key >>> 8) & 0xff,
+    (key >>> 16) & 0xff,
+    (key >>> 24) & 0xff,
+    Opcode.OP_get_array_el3,
+    Opcode.OP_push_i32, 1, 0, 0, 0,
+    Opcode.OP_add,
+    Opcode.OP_insert3,
+    Opcode.OP_put_array_el,
+  ]))
+})
+
+test('emitter: logical && assignment on property', () => {
+  const atoms = new AtomTable()
+  const obj = atoms.getOrAdd('obj')
+  const prop = atoms.getOrAdd('value')
+  const bytes = compileExpression('obj.value &&= 1;', atoms)
+  assert.deepEqual(Array.from(bytes), withLineInfo([
+    Opcode.OP_get_var,
+    obj & 0xff,
+    (obj >>> 8) & 0xff,
+    (obj >>> 16) & 0xff,
+    (obj >>> 24) & 0xff,
+    Opcode.OP_get_field2,
+    prop & 0xff,
+    (prop >>> 8) & 0xff,
+    (prop >>> 16) & 0xff,
+    (prop >>> 24) & 0xff,
+    Opcode.OP_dup,
+    Opcode.OP_if_false,
+    1, 0, 0, 0,
+    Opcode.OP_drop,
+    Opcode.OP_drop,
+    Opcode.OP_push_i32, 1, 0, 0, 0,
+    Opcode.OP_insert2,
+    Opcode.OP_put_field,
+    prop & 0xff,
+    (prop >>> 8) & 0xff,
+    (prop >>> 16) & 0xff,
+    (prop >>> 24) & 0xff,
+    Opcode.OP_goto,
+    0, 0, 0, 0,
+    TempOpcode.OP_label,
+    1, 0, 0, 0,
+    Opcode.OP_swap,
+    Opcode.OP_drop,
+    TempOpcode.OP_label,
+    0, 0, 0, 0,
+  ]))
+})
+
+test('emitter: logical ||= assignment on property', () => {
+  const atoms = new AtomTable()
+  const obj = atoms.getOrAdd('obj')
+  const prop = atoms.getOrAdd('value')
+  const bytes = compileExpression('obj.value ||= 1;', atoms)
+  assert.deepEqual(Array.from(bytes), withLineInfo([
+    Opcode.OP_get_var,
+    obj & 0xff,
+    (obj >>> 8) & 0xff,
+    (obj >>> 16) & 0xff,
+    (obj >>> 24) & 0xff,
+    Opcode.OP_get_field2,
+    prop & 0xff,
+    (prop >>> 8) & 0xff,
+    (prop >>> 16) & 0xff,
+    (prop >>> 24) & 0xff,
+    Opcode.OP_dup,
+    Opcode.OP_if_true,
+    1, 0, 0, 0,
+    Opcode.OP_drop,
+    Opcode.OP_drop,
+    Opcode.OP_push_i32, 1, 0, 0, 0,
+    Opcode.OP_insert2,
+    Opcode.OP_put_field,
+    prop & 0xff,
+    (prop >>> 8) & 0xff,
+    (prop >>> 16) & 0xff,
+    (prop >>> 24) & 0xff,
+    Opcode.OP_goto,
+    0, 0, 0, 0,
+    TempOpcode.OP_label,
+    1, 0, 0, 0,
+    Opcode.OP_swap,
+    Opcode.OP_drop,
+    TempOpcode.OP_label,
+    0, 0, 0, 0,
+  ]))
+})
+
+test('emitter: logical ??= assignment on property', () => {
+  const atoms = new AtomTable()
+  const obj = atoms.getOrAdd('obj')
+  const prop = atoms.getOrAdd('value')
+  const bytes = compileExpression('obj.value ??= 1;', atoms)
+  assert.deepEqual(Array.from(bytes), withLineInfo([
+    Opcode.OP_get_var,
+    obj & 0xff,
+    (obj >>> 8) & 0xff,
+    (obj >>> 16) & 0xff,
+    (obj >>> 24) & 0xff,
+    Opcode.OP_get_field2,
+    prop & 0xff,
+    (prop >>> 8) & 0xff,
+    (prop >>> 16) & 0xff,
+    (prop >>> 24) & 0xff,
+    Opcode.OP_dup,
+    Opcode.OP_is_undefined_or_null,
+    Opcode.OP_if_true,
+    1, 0, 0, 0,
+    Opcode.OP_swap,
+    Opcode.OP_drop,
+    Opcode.OP_goto,
+    0, 0, 0, 0,
+    TempOpcode.OP_label,
+    1, 0, 0, 0,
+    Opcode.OP_drop,
+    Opcode.OP_push_i32, 1, 0, 0, 0,
+    Opcode.OP_insert2,
+    Opcode.OP_put_field,
+    prop & 0xff,
+    (prop >>> 8) & 0xff,
+    (prop >>> 16) & 0xff,
+    (prop >>> 24) & 0xff,
+    TempOpcode.OP_label,
+    0, 0, 0, 0,
+  ]))
+})
+
+test('emitter: logical && assignment on element', () => {
+  const atoms = new AtomTable()
+  const obj = atoms.getOrAdd('obj')
+  const key = atoms.getOrAdd('key')
+  const bytes = compileExpression('obj[key] &&= 1;', atoms)
+  assert.deepEqual(Array.from(bytes), withLineInfo([
+    Opcode.OP_get_var,
+    obj & 0xff,
+    (obj >>> 8) & 0xff,
+    (obj >>> 16) & 0xff,
+    (obj >>> 24) & 0xff,
+    Opcode.OP_get_var,
+    key & 0xff,
+    (key >>> 8) & 0xff,
+    (key >>> 16) & 0xff,
+    (key >>> 24) & 0xff,
+    Opcode.OP_get_array_el3,
+    Opcode.OP_dup,
+    Opcode.OP_if_false,
+    1, 0, 0, 0,
+    Opcode.OP_drop,
+    Opcode.OP_drop,
+    Opcode.OP_push_i32, 1, 0, 0, 0,
+    Opcode.OP_insert3,
+    Opcode.OP_put_array_el,
+    Opcode.OP_goto,
+    0, 0, 0, 0,
+    TempOpcode.OP_label,
+    1, 0, 0, 0,
+    Opcode.OP_rot3r,
+    Opcode.OP_drop,
+    Opcode.OP_drop,
+    TempOpcode.OP_label,
+    0, 0, 0, 0,
+  ]))
+})
+
+test('emitter: logical ||= assignment on element', () => {
+  const atoms = new AtomTable()
+  const obj = atoms.getOrAdd('obj')
+  const key = atoms.getOrAdd('key')
+  const bytes = compileExpression('obj[key] ||= 1;', atoms)
+  assert.deepEqual(Array.from(bytes), withLineInfo([
+    Opcode.OP_get_var,
+    obj & 0xff,
+    (obj >>> 8) & 0xff,
+    (obj >>> 16) & 0xff,
+    (obj >>> 24) & 0xff,
+    Opcode.OP_get_var,
+    key & 0xff,
+    (key >>> 8) & 0xff,
+    (key >>> 16) & 0xff,
+    (key >>> 24) & 0xff,
+    Opcode.OP_get_array_el3,
+    Opcode.OP_dup,
+    Opcode.OP_if_true,
+    1, 0, 0, 0,
+    Opcode.OP_drop,
+    Opcode.OP_drop,
+    Opcode.OP_push_i32, 1, 0, 0, 0,
+    Opcode.OP_insert3,
+    Opcode.OP_put_array_el,
+    Opcode.OP_goto,
+    0, 0, 0, 0,
+    TempOpcode.OP_label,
+    1, 0, 0, 0,
+    Opcode.OP_rot3r,
+    Opcode.OP_drop,
+    Opcode.OP_drop,
+    TempOpcode.OP_label,
+    0, 0, 0, 0,
+  ]))
+})
+
+test('emitter: logical ??= assignment on element', () => {
+  const atoms = new AtomTable()
+  const obj = atoms.getOrAdd('obj')
+  const key = atoms.getOrAdd('key')
+  const bytes = compileExpression('obj[key] ??= 1;', atoms)
+  assert.deepEqual(Array.from(bytes), withLineInfo([
+    Opcode.OP_get_var,
+    obj & 0xff,
+    (obj >>> 8) & 0xff,
+    (obj >>> 16) & 0xff,
+    (obj >>> 24) & 0xff,
+    Opcode.OP_get_var,
+    key & 0xff,
+    (key >>> 8) & 0xff,
+    (key >>> 16) & 0xff,
+    (key >>> 24) & 0xff,
+    Opcode.OP_get_array_el3,
+    Opcode.OP_dup,
+    Opcode.OP_is_undefined_or_null,
+    Opcode.OP_if_true,
+    1, 0, 0, 0,
+    Opcode.OP_rot3r,
+    Opcode.OP_drop,
+    Opcode.OP_drop,
+    Opcode.OP_goto,
+    0, 0, 0, 0,
+    TempOpcode.OP_label,
+    1, 0, 0, 0,
+    Opcode.OP_drop,
+    Opcode.OP_push_i32, 1, 0, 0, 0,
+    Opcode.OP_insert3,
+    Opcode.OP_put_array_el,
+    TempOpcode.OP_label,
+    0, 0, 0, 0,
+  ]))
+})
+
+test('emitter: array literal emits OP_array_from', () => {
+  const bytes = compileExpression('[1, 2];')
+  assert.deepEqual(Array.from(bytes), withLineInfo([
+    Opcode.OP_push_i32, 1, 0, 0, 0,
+    Opcode.OP_push_i32, 2, 0, 0, 0,
+    Opcode.OP_array_from,
+    2, 0,
+  ]))
+})
+
+test('emitter: object literal emits OP_define_field', () => {
+  const atoms = new AtomTable()
+  const a = atoms.getOrAdd('a')
+  const b = atoms.getOrAdd('b')
+  const bytes = compileExpression('({ a: 1, b: 2 });', atoms)
+  assert.deepEqual(Array.from(bytes), withLineInfo([
+    Opcode.OP_object,
+    Opcode.OP_push_i32, 1, 0, 0, 0,
+    Opcode.OP_define_field,
+    a & 0xff,
+    (a >>> 8) & 0xff,
+    (a >>> 16) & 0xff,
+    (a >>> 24) & 0xff,
+    Opcode.OP_push_i32, 2, 0, 0, 0,
+    Opcode.OP_define_field,
+    b & 0xff,
+    (b >>> 8) & 0xff,
+    (b >>> 16) & 0xff,
+    (b >>> 24) & 0xff,
+  ]))
+})
+
+test('emitter: object literal with computed name', () => {
+  const atoms = new AtomTable()
+  const key = atoms.getOrAdd('key')
+  const bytes = compileExpression('({ [key]: 1 });', atoms)
+  assert.deepEqual(Array.from(bytes), withLineInfo([
+    Opcode.OP_object,
+    Opcode.OP_get_var,
+    key & 0xff,
+    (key >>> 8) & 0xff,
+    (key >>> 16) & 0xff,
+    (key >>> 24) & 0xff,
+    Opcode.OP_push_i32, 1, 0, 0, 0,
+    Opcode.OP_define_array_el,
+    Opcode.OP_drop,
+  ]))
+})
+
+test('emitter: object literal shorthand property', () => {
+  const atoms = new AtomTable()
+  const a = atoms.getOrAdd('a')
+  const bytes = compileExpression('({ a });', atoms)
+  assert.deepEqual(Array.from(bytes), withLineInfo([
+    Opcode.OP_object,
+    Opcode.OP_get_var,
+    a & 0xff,
+    (a >>> 8) & 0xff,
+    (a >>> 16) & 0xff,
+    (a >>> 24) & 0xff,
+    Opcode.OP_define_field,
+    a & 0xff,
+    (a >>> 8) & 0xff,
+    (a >>> 16) & 0xff,
+    (a >>> 24) & 0xff,
+  ]))
+})
+
+test('emitter: array literal with spread', () => {
+  const atoms = new AtomTable()
+  const arr = atoms.getOrAdd('arr')
+  const bytes = compileExpression('[1, ...arr, 2];', atoms)
+  assert.deepEqual(Array.from(bytes), withLineInfo([
+    Opcode.OP_array_from, 0, 0,
+    Opcode.OP_push_i32, 0, 0, 0, 0,
+    Opcode.OP_push_i32, 1, 0, 0, 0,
+    Opcode.OP_define_array_el,
+    Opcode.OP_inc,
+    Opcode.OP_get_var,
+    arr & 0xff,
+    (arr >>> 8) & 0xff,
+    (arr >>> 16) & 0xff,
+    (arr >>> 24) & 0xff,
+    Opcode.OP_append,
+    Opcode.OP_push_i32, 2, 0, 0, 0,
+    Opcode.OP_define_array_el,
+    Opcode.OP_inc,
+    Opcode.OP_drop,
+  ]))
+})
+
+test('emitter: array literal with hole', () => {
+  const bytes = compileExpression('[1, , 2];')
+  assert.deepEqual(Array.from(bytes), withLineInfo([
+    Opcode.OP_array_from, 0, 0,
+    Opcode.OP_push_i32, 0, 0, 0, 0,
+    Opcode.OP_push_i32, 1, 0, 0, 0,
+    Opcode.OP_define_array_el,
+    Opcode.OP_inc,
+    Opcode.OP_inc,
+    Opcode.OP_push_i32, 2, 0, 0, 0,
+    Opcode.OP_define_array_el,
+    Opcode.OP_inc,
+    Opcode.OP_drop,
+  ]))
+})
+
+test('emitter: object literal spread', () => {
+  const atoms = new AtomTable()
+  const obj = atoms.getOrAdd('obj')
+  const a = atoms.getOrAdd('a')
+  const bytes = compileExpression('({ ...obj, a: 1 });', atoms)
+  assert.deepEqual(Array.from(bytes), withLineInfo([
+    Opcode.OP_object,
+    Opcode.OP_get_var,
+    obj & 0xff,
+    (obj >>> 8) & 0xff,
+    (obj >>> 16) & 0xff,
+    (obj >>> 24) & 0xff,
+    Opcode.OP_null,
+    Opcode.OP_copy_data_properties,
+    COPY_DATA_PROPERTIES_OPERAND_SPREAD,
+    Opcode.OP_drop,
+    Opcode.OP_drop,
+    Opcode.OP_push_i32, 1, 0, 0, 0,
+    Opcode.OP_define_field,
+    a & 0xff,
+    (a >>> 8) & 0xff,
+    (a >>> 16) & 0xff,
+    (a >>> 24) & 0xff,
   ]))
 })
 

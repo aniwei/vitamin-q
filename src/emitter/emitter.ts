@@ -9,6 +9,7 @@ import { InlineCacheManager } from './inline-cache'
 import { LabelManager } from './label-manager'
 import { ConstantPoolManager } from './constant-pool'
 import { ExpressionEmitter } from './expressions'
+import { StatementEmitter } from './statements'
 import { ScopeManager } from './scope-manager'
 
 import { AstDispatcher } from '../ast/dispatcher'
@@ -267,11 +268,13 @@ export class BytecodeCompiler {
   private dispatcher: AstDispatcher<EmitterContext, void>
   private options: BytecodeCompilerOptions
   private expressionEmitter: ExpressionEmitter
+  private statementEmitter: StatementEmitter
 
   constructor(options: BytecodeCompilerOptions = {}) {
     this.options = options
     this.dispatcher = new AstDispatcher<EmitterContext, void>()
     this.expressionEmitter = new ExpressionEmitter()
+    this.statementEmitter = new StatementEmitter()
     this.dispatcher.setFallback((node) => {
       throw new Error(`未实现节点发射: ${ts.SyntaxKind[node.kind]}`)
     })
@@ -325,6 +328,47 @@ export class BytecodeCompiler {
       this.dispatcher.dispatch(stmt.expression, context)
     })
 
+    this.dispatcher.registerStatement(ts.SyntaxKind.IfStatement, (node, context) => {
+      this.statementEmitter.emitIfStatement(
+        node as ts.IfStatement,
+        context,
+        (expr, ctx) => this.expressionEmitter.emitExpression(expr, ctx),
+        (stmt, ctx) => this.dispatcher.dispatch(stmt, ctx),
+      )
+    })
+
+    this.dispatcher.registerStatement(ts.SyntaxKind.VariableStatement, (node, context) => {
+      this.statementEmitter.emitVariableStatement(
+        node as ts.VariableStatement,
+        context,
+        (expr, ctx) => this.expressionEmitter.emitExpression(expr, ctx),
+      )
+    })
+
+    this.dispatcher.registerDeclaration(ts.SyntaxKind.VariableStatement, (node, context) => {
+      this.statementEmitter.emitVariableStatement(
+        node as ts.VariableStatement,
+        context,
+        (expr, ctx) => this.expressionEmitter.emitExpression(expr, ctx),
+      )
+    })
+
+    this.dispatcher.registerStatement(ts.SyntaxKind.ReturnStatement, (node, context) => {
+      this.statementEmitter.emitReturnStatement(
+        node as ts.ReturnStatement,
+        context,
+        (expr, ctx) => this.expressionEmitter.emitExpression(expr, ctx),
+      )
+    })
+
+    this.dispatcher.registerStatement(ts.SyntaxKind.ThrowStatement, (node, context) => {
+      this.statementEmitter.emitThrowStatement(
+        node as ts.ThrowStatement,
+        context,
+        (expr, ctx) => this.expressionEmitter.emitExpression(expr, ctx),
+      )
+    })
+
     const expressionKinds: ts.SyntaxKind[] = [
       ts.SyntaxKind.ParenthesizedExpression,
       ts.SyntaxKind.NumericLiteral,
@@ -347,6 +391,8 @@ export class BytecodeCompiler {
       ts.SyntaxKind.ConditionalExpression,
       ts.SyntaxKind.MetaProperty,
       ts.SyntaxKind.AwaitExpression,
+      ts.SyntaxKind.ArrayLiteralExpression,
+      ts.SyntaxKind.ObjectLiteralExpression,
     ]
 
     for (const kind of expressionKinds) {

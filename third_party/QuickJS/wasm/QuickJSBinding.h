@@ -100,6 +100,48 @@ struct LineColCache {
   int32_t column;
 };
 
+struct ConstantPoolResult {
+  std::vector<int32_t> indices;
+  uint32_t count;
+};
+
+struct InlineCacheResult {
+  std::vector<int32_t> results;
+  uint32_t count;
+};
+
+struct LabelSlotInfo {
+  int32_t refCount;
+  int32_t pos;
+  int32_t pos2;
+  int32_t addr;
+  int32_t firstReloc;
+};
+
+struct LabelManagerResult {
+  std::vector<LabelSlotInfo> slots;
+  uint32_t bytecodeSize;
+};
+
+struct ScopeVarSnapshot {
+  uint32_t varName;
+  int32_t scopeLevel;
+  int32_t scopeNext;
+  uint8_t varKind;
+};
+
+struct ScopeScopeSnapshot {
+  int32_t parent;
+  int32_t first;
+};
+
+struct ScopeManagerSnapshot {
+  std::vector<ScopeVarSnapshot> vars;
+  std::vector<ScopeScopeSnapshot> scopes;
+  int32_t scopeLevel;
+  int32_t scopeFirst;
+};
+
 class QuickJSBinding {
   using Ptr = std::shared_ptr<QuickJSBinding>;
 
@@ -178,6 +220,22 @@ class QuickJSBinding {
     uint32_t cachePtr,
     int32_t cacheLine,
     int32_t cacheColumn);
+
+  static ConstantPoolResult getConstantPoolAddResult(
+    std::vector<int32_t> values);
+
+  static InlineCacheResult getInlineCacheAddResult(
+    std::vector<int32_t> atoms);
+
+  static LabelManagerResult getLabelManagerScenario();
+
+  static ScopeManagerSnapshot getScopeManagerScenario(
+    uint32_t atomA,
+    uint32_t atomB,
+    uint32_t atomC,
+    uint8_t kindA,
+    uint8_t kindB,
+    uint8_t kindC);
 
   static std::vector<Atom> getAtoms();
   static std::vector<Atom> getEnvironmentAtoms();

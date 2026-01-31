@@ -247,6 +247,68 @@ export class QuickJSLib {
     return { ptr: result.ptr, line: result.line, column: result.column }
   }
 
+  static getConstantPoolAddResult = async (values: number[]): Promise<{ indices: number[]; count: number }> => {
+    const WasmInstance = await QuickJSLib.getWasmInstance()
+    const vec = new WasmInstance.Int32Array()
+    for (const value of values) {
+      vec.push_back(value)
+    }
+    const result = WasmInstance.QuickJSBinding.getConstantPoolAddResult(vec)
+    const indices: number[] = []
+    for (let i = 0; i < result.indices.size(); i++) {
+      indices.push(result.indices.get(i))
+    }
+    return { indices, count: result.count }
+  }
+
+  static getInlineCacheAddResult = async (atoms: number[]): Promise<{ results: number[]; count: number }> => {
+    const WasmInstance = await QuickJSLib.getWasmInstance()
+    const vec = new WasmInstance.Int32Array()
+    for (const atom of atoms) {
+      vec.push_back(atom)
+    }
+    const result = WasmInstance.QuickJSBinding.getInlineCacheAddResult(vec)
+    const results: number[] = []
+    for (let i = 0; i < result.results.size(); i++) {
+      results.push(result.results.get(i))
+    }
+    return { results, count: result.count }
+  }
+
+  static getLabelManagerScenario = async (): Promise<{ bytecodeSize: number; slots: Array<{ refCount: number; pos: number; pos2: number; addr: number; firstReloc: number }> }> => {
+    const WasmInstance = await QuickJSLib.getWasmInstance()
+    const result = WasmInstance.QuickJSBinding.getLabelManagerScenario()
+    const slots: Array<{ refCount: number; pos: number; pos2: number; addr: number; firstReloc: number }> = []
+    for (let i = 0; i < result.slots.size(); i++) {
+      const slot = result.slots.get(i)
+      slots.push({ refCount: slot.refCount, pos: slot.pos, pos2: slot.pos2, addr: slot.addr, firstReloc: slot.firstReloc })
+    }
+    return { bytecodeSize: result.bytecodeSize, slots }
+  }
+
+  static getScopeManagerScenario = async (
+    atomA: number,
+    atomB: number,
+    atomC: number,
+    kindA: number,
+    kindB: number,
+    kindC: number,
+  ): Promise<{ vars: Array<{ varName: number; scopeLevel: number; scopeNext: number; varKind: number }>; scopes: Array<{ parent: number; first: number }>; scopeLevel: number; scopeFirst: number }> => {
+    const WasmInstance = await QuickJSLib.getWasmInstance()
+    const result = WasmInstance.QuickJSBinding.getScopeManagerScenario(atomA, atomB, atomC, kindA, kindB, kindC)
+    const vars: Array<{ varName: number; scopeLevel: number; scopeNext: number; varKind: number }> = []
+    for (let i = 0; i < result.vars.size(); i++) {
+      const item = result.vars.get(i)
+      vars.push({ varName: item.varName, scopeLevel: item.scopeLevel, scopeNext: item.scopeNext, varKind: item.varKind })
+    }
+    const scopes: Array<{ parent: number; first: number }> = []
+    for (let i = 0; i < result.scopes.size(); i++) {
+      const item = result.scopes.get(i)
+      scopes.push({ parent: item.parent, first: item.first })
+    }
+    return { vars, scopes, scopeLevel: result.scopeLevel, scopeFirst: result.scopeFirst }
+  }
+
   static async runWithBinaryPath(binaryPath: string) {
     const WasmInstance = await QuickJSLib.getWasmInstance()
     const source = readFileSync(binaryPath)
