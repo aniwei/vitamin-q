@@ -8,7 +8,7 @@ export type ExpressionEmitterFn = (node: ts.Expression, context: EmitterContext)
 /**
  * 赋值表达式发射器。
  *
- * @source QuickJS/src/core/parser.c:5703-6301
+ * @source QuickJS/src/core/parser.c:6004
  * @see js_parse_assign_expr2
  */
 export class AssignmentEmitter {

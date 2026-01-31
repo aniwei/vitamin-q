@@ -1,6 +1,7 @@
 import { spawnSync } from 'node:child_process'
 import { existsSync, readFileSync } from 'node:fs'
 import { resolve, relative, basename } from 'node:path'
+import { pathToFileURL } from 'node:url'
 
 interface Atom {
   id: number
@@ -69,6 +70,14 @@ interface WasmInstance {
 export class QuickJSLib {
   // 使用 any 以避免对 Emscripten 模块结构的过度约束
   static WasmInstance: any | null = null
+  private static rebuildAttempted = false
+
+  private static readonly requiredBindings = [
+    'getConstantPoolAddResult',
+    'getInlineCacheAddResult',
+    'getLabelManagerScenario',
+    'getScopeManagerScenario',
+  ] as const
 
   private static outputHandlers: {
     print: (text: string) => void
@@ -103,7 +112,7 @@ export class QuickJSLib {
     }
   }
 
-  static ensureWasmBuilt () {
+  static ensureWasmBuilt (forceRebuild = false) {
     const path = resolve(process.cwd(), 'third_party/QuickJS/wasm/output/quickjs_wasm.js')
     const configPath = resolve(process.cwd(), 'third_party/QuickJS/wasm/output/quickjs_wasm.build-config.json')
     const wantTrace = process.env.QTS_TRACE_ENABLED === '1'
@@ -147,7 +156,7 @@ export class QuickJSLib {
       },
     }
 
-    if (existsSync(path) && existsSync(configPath)) {
+    if (!forceRebuild && existsSync(path) && existsSync(configPath)) {
       try {
         const cfg = JSON.parse(readFileSync(configPath, 'utf8'))
         const built = cfg?.qtsTrace
@@ -168,7 +177,7 @@ export class QuickJSLib {
       }
     }
 
-    if (existsSync(path) && desiredEnabled === 0 && !existsSync(configPath)) {
+    if (!forceRebuild && existsSync(path) && desiredEnabled === 0 && !existsSync(configPath)) {
       // 旧版构建没有 marker：默认认为是 non-trace
       return path
     }
@@ -190,17 +199,43 @@ export class QuickJSLib {
     return existsSync(path) ? path : null
   }
 
+  private static hasRequiredBindings(instance: any): boolean {
+    const binding = instance?.QuickJSBinding
+    if (!binding) return false
+    if (typeof instance?.Int32Array !== 'function') return false
+    return QuickJSLib.requiredBindings.every(name => typeof binding[name] === 'function')
+  }
+
+  private static async loadWasmInstance(path: string, cacheBust = false): Promise<any> {
+    const url = pathToFileURL(path)
+    const importPath = cacheBust ? `${url.href}?t=${Date.now()}` : url.href
+    const WasmModule: any = await import(importPath)
+    return WasmModule.default({
+      print: (text: string) => QuickJSLib.outputHandlers.print(text),
+      printErr: (text: string) => QuickJSLib.outputHandlers.printErr(text),
+    })
+  }
+
   static getWasmInstance = async (): Promise<any> => {
     if (QuickJSLib.WasmInstance) return QuickJSLib.WasmInstance
 
     const path = QuickJSLib.ensureWasmBuilt()
     if (!path) throw new Error('QuickJS wasm binding not available')
 
-    const WasmModule: any = await import(path)
-    QuickJSLib.WasmInstance = await WasmModule.default({
-      print: (text: string) => QuickJSLib.outputHandlers.print(text),
-      printErr: (text: string) => QuickJSLib.outputHandlers.printErr(text),
-    })
+    let instance = await QuickJSLib.loadWasmInstance(path)
+
+    if (!QuickJSLib.hasRequiredBindings(instance) && !QuickJSLib.rebuildAttempted) {
+      QuickJSLib.rebuildAttempted = true
+      const rebuiltPath = QuickJSLib.ensureWasmBuilt(true)
+      if (!rebuiltPath) throw new Error('QuickJS wasm binding rebuild failed')
+      instance = await QuickJSLib.loadWasmInstance(rebuiltPath, true)
+    }
+
+    if (!QuickJSLib.hasRequiredBindings(instance)) {
+      throw new Error('QuickJS wasm binding missing required interfaces. Please rebuild QuickJS wasm.')
+    }
+
+    QuickJSLib.WasmInstance = instance
     return QuickJSLib.WasmInstance as WasmInstance
   }
 
