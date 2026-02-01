@@ -90,8 +90,7 @@ export class DestructuringEmitter {
       context.bytecode.emitOp(Opcode.OP_get_field2)
       context.bytecode.emitAtom(propAtom)
       context.bytecode.emitIC(propAtom)
-      context.bytecode.emitOp(Opcode.OP_put_var_init)
-      context.bytecode.emitAtom(targetAtom)
+      this.emitBindingInit(targetAtom, context)
     }
 
     context.bytecode.emitOp(Opcode.OP_drop)
@@ -132,8 +131,7 @@ export class DestructuringEmitter {
       context.bytecode.emitOp(Opcode.OP_for_of_next)
       context.bytecode.emitU8(0)
       context.bytecode.emitOp(Opcode.OP_drop)
-      context.bytecode.emitOp(Opcode.OP_put_var_init)
-      context.bytecode.emitAtom(atom)
+      this.emitBindingInit(atom, context)
     }
 
     context.bytecode.emitOp(Opcode.OP_iterator_close)
@@ -156,8 +154,7 @@ export class DestructuringEmitter {
       context.bytecode.emitOp(Opcode.OP_get_field2)
       context.bytecode.emitAtom(propAtom)
       context.bytecode.emitIC(propAtom)
-      context.bytecode.emitOp(Opcode.OP_put_var_init)
-      context.bytecode.emitAtom(targetAtom)
+      this.emitBindingInit(targetAtom, context)
     }
 
     context.bytecode.emitOp(Opcode.OP_drop)
@@ -175,8 +172,7 @@ export class DestructuringEmitter {
       context.bytecode.emitOp(Opcode.OP_for_of_next)
       context.bytecode.emitU8(0)
       context.bytecode.emitOp(Opcode.OP_drop)
-      context.bytecode.emitOp(Opcode.OP_put_var_init)
-      context.bytecode.emitAtom(atom)
+      this.emitBindingInit(atom, context)
     }
 
     context.bytecode.emitOp(Opcode.OP_iterator_close)
@@ -259,6 +255,20 @@ export class DestructuringEmitter {
     context.labels.emitGoto(Opcode.OP_goto, assignLabel)
 
     context.labels.emitLabel(endLabel)
+  }
+
+  private emitBindingInit(atom: number, context: EmitterContext) {
+    const scopeLevel = context.scopes.scopeLevel
+    if (scopeLevel >= 0) {
+      const localIdx = context.scopes.findVarInScope(atom, scopeLevel)
+      if (localIdx >= 0) {
+        context.bytecode.emitOp(Opcode.OP_put_loc)
+        context.bytecode.emitU16(localIdx)
+        return
+      }
+    }
+    context.bytecode.emitOp(Opcode.OP_put_var_init)
+    context.bytecode.emitAtom(atom)
   }
 
   private getObjectBindingAtoms(

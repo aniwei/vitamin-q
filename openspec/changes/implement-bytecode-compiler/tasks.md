@@ -212,7 +212,7 @@
   - 剩余元素（rest element）
   - **标注 C 源码**: 对应解构相关发射逻辑
 
-- [ ] 3.7 实现函数发射 (`src/emitter/functions.ts`)
+- [x] 3.7 实现函数发射 (`src/emitter/functions.ts`)
   - js_new_function_def: 创建函数定义
   - js_parse_function_decl2: 函数声明/表达式解析
   - 函数体编译（FunctionDeclaration, ArrowFunction, FunctionExpression）
@@ -224,20 +224,27 @@
   - home_object 处理（方法中的 super）
   - 参考 `docs/quickjs/syntax-to-bytecode/functions.md`
   - **标注 C 源码**: 对应 js_new_function_def, js_parse_function_decl2 等函数
+  - [x] 参数初始化对齐（默认参数/剩余参数/解构参数）
+  - [x] arrow 函数 `arguments` 绑定外层
+  - [x] `arguments` 映射模式
+  - [x] `this`/`new.target`/`home_object` 细节对齐
 
-- [ ] 3.7a 实现生成器函数发射 (`src/emitter/generators.ts`)
+- [x] 3.7a 实现生成器函数发射 (`src/emitter/generators.ts`)
   - Generator 函数编译
   - yield 表达式发射
   - yield* 委托发射
   - **标注 C 源码**: 对应生成器相关发射逻辑
 
-- [ ] 3.7b 实现异步函数发射 (`src/emitter/async.ts`)
+- [x] 3.7b 实现异步函数发射 (`src/emitter/async.ts`)
   - async 函数编译
   - await 表达式发射
   - async generator 函数
   - **标注 C 源码**: 对应异步函数相关发射逻辑
+  - [x] await 表达式发射对齐
+  - [x] for-await-of 语句发射对齐
+  - [x] async yield* 展开逻辑对齐
 
-- [ ] 3.8 实现类发射 (`src/emitter/classes.ts`)
+- [x] 3.8 实现类发射 (`src/emitter/classes.ts`)
   - js_parse_class: 类解析主函数
   - 类构建（ClassDeclaration, ClassExpression）
   - 构造函数处理（含派生类构造函数）
@@ -256,10 +263,18 @@
   - 参考 `docs/quickjs/syntax-to-bytecode/classes.md`
   - **标注 C 源码**: 对应 js_parse_class, js_parse_class_default_ctor 等函数
 
-- [ ] 3.9 发射器单元测试
-  - 操作码序列验证
-  - 常量池验证
-  - 标签引用验证
+- [x] 3.9 发射器单元测试
+  - [x] 操作码序列验证
+  - [x] 常量池验证
+  - [x] 标签引用验证
+  - [x] 函数体 wasm 对齐（return/rest/await/for-await-of）
+  - [x] async yield* wasm 对齐
+  - [x] generator yield/yield* wasm 对齐
+  - [x] async generator yield wasm 对齐
+  - [x] generator/async generator return/empty wasm 对齐
+  - [x] async generator for-await-of wasm 对齐
+  - [x] expressions wasm 对齐
+  - [x] literals spread/__proto__ wasm 对齐
 
 ## 3a. 正则表达式处理模块
 

@@ -244,12 +244,8 @@ test('emitter: logical && emits short-circuit labels', () => {
     (b >>> 8) & 0xff,
     (b >>> 16) & 0xff,
     (b >>> 24) & 0xff,
-    Opcode.OP_goto,
-    1, 0, 0, 0,
     TempOpcode.OP_label,
     0, 0, 0, 0,
-    TempOpcode.OP_label,
-    1, 0, 0, 0,
   ]))
 })
 
@@ -273,12 +269,8 @@ test('emitter: logical || emits short-circuit labels', () => {
     (b >>> 8) & 0xff,
     (b >>> 16) & 0xff,
     (b >>> 24) & 0xff,
-    Opcode.OP_goto,
-    1, 0, 0, 0,
     TempOpcode.OP_label,
     0, 0, 0, 0,
-    TempOpcode.OP_label,
-    1, 0, 0, 0,
   ]))
 })
 
@@ -295,11 +287,7 @@ test('emitter: nullish coalescing emits labels', () => {
     (a >>> 24) & 0xff,
     Opcode.OP_dup,
     Opcode.OP_is_undefined_or_null,
-    Opcode.OP_if_true,
-    0, 0, 0, 0,
-    Opcode.OP_goto,
-    1, 0, 0, 0,
-    TempOpcode.OP_label,
+    Opcode.OP_if_false,
     0, 0, 0, 0,
     Opcode.OP_drop,
     Opcode.OP_get_var,
@@ -308,7 +296,7 @@ test('emitter: nullish coalescing emits labels', () => {
     (b >>> 16) & 0xff,
     (b >>> 24) & 0xff,
     TempOpcode.OP_label,
-    1, 0, 0, 0,
+    0, 0, 0, 0,
   ]))
 })
 

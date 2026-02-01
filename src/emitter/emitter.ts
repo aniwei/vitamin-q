@@ -139,6 +139,7 @@ export interface EmitterContextOptions {
   constantPool?: ConstantPoolManager
   argMap?: Map<string, number>
   inFunction?: boolean
+  inArrow?: boolean
   inAsync?: boolean
   inGenerator?: boolean
   privateBindings?: Map<string, { index: number; kind: 'field' | 'method' | 'accessor' }>
@@ -160,12 +161,15 @@ export class EmitterContext {
   readonly atomTable?: AtomTable
   readonly argMap: Map<string, number>
   readonly inFunction: boolean
+  readonly inArrow: boolean
   readonly inAsync: boolean
   readonly inGenerator: boolean
   readonly privateBindings?: Map<string, { index: number; kind: 'field' | 'method' | 'accessor' }>
   private liveCode = true
   private lineColCache
   private nextTempLocal = 1
+  private specialVars = new Map<string, number>()
+  private iteratorDepth = 0
 
   constructor(options: EmitterContextOptions) {
     this.sourceFile = options.sourceFile
@@ -175,6 +179,7 @@ export class EmitterContext {
     this.atomTable = options.atomTable
     this.argMap = options.argMap ?? new Map()
     this.inFunction = options.inFunction ?? false
+    this.inArrow = options.inArrow ?? false
     this.inAsync = options.inAsync ?? false
     this.inGenerator = options.inGenerator ?? false
     this.privateBindings = options.privateBindings
@@ -190,6 +195,20 @@ export class EmitterContext {
       isLiveCode: () => this.liveCode,
     })
     this.lineColCache = createLineColCache(this.sourceFile.text)
+  }
+
+  pushIterator() {
+    this.iteratorDepth += 1
+  }
+
+  popIterator() {
+    if (this.iteratorDepth > 0) {
+      this.iteratorDepth -= 1
+    }
+  }
+
+  hasIterator() {
+    return this.iteratorDepth > 0
   }
 
   /**
@@ -307,6 +326,14 @@ export class EmitterContext {
     this.nextTempLocal += 1
     return idx
   }
+
+  setSpecialVar(name: string, index: number) {
+    this.specialVars.set(name, index)
+  }
+
+  getSpecialVar(name: string): number | undefined {
+    return this.specialVars.get(name)
+  }
 }
 
 export interface BytecodeCompilerOptions {
@@ -378,11 +405,16 @@ export class BytecodeCompiler {
   private registerCoreHandlers() {
     this.dispatcher.registerStatement(ts.SyntaxKind.Block, (node, context) => {
       const block = node as ts.Block
-      const scope = context.pushScope()
+      const needsScope = this.blockNeedsScope(block)
+      if (needsScope) {
+        context.pushScope()
+      }
       for (const stmt of block.statements) {
         this.dispatcher.dispatch(stmt, context)
       }
-      context.popScope()
+      if (needsScope) {
+        context.popScope()
+      }
     })
 
     this.dispatcher.registerStatement(ts.SyntaxKind.EmptyStatement, () => {
@@ -393,7 +425,14 @@ export class BytecodeCompiler {
       const stmt = node as ts.ExpressionStatement
       context.emitSourcePos(stmt)
       this.dispatcher.dispatch(stmt.expression, context)
-      if (this.options.expressionStatementDrop) {
+      if (
+        this.options.expressionStatementDrop &&
+        !(
+          ts.isYieldExpression(stmt.expression) &&
+          stmt.expression.asteriskToken &&
+          context.inGenerator
+        )
+      ) {
         context.bytecode.emitOp(Opcode.OP_drop)
       }
     })
@@ -583,5 +622,20 @@ export class BytecodeCompiler {
         this.expressionEmitter.emitExpression(node as ts.Expression, context)
       })
     }
+  }
+
+  private blockNeedsScope(block: ts.Block): boolean {
+    for (const stmt of block.statements) {
+      if (ts.isVariableStatement(stmt)) {
+        const flags = stmt.declarationList.flags
+        if (flags & (ts.NodeFlags.Let | ts.NodeFlags.Const)) {
+          return true
+        }
+      }
+      if (ts.isClassDeclaration(stmt) || ts.isFunctionDeclaration(stmt)) {
+        return true
+      }
+    }
+    return false
   }
 }

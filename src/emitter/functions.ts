@@ -1,6 +1,6 @@
 import ts from 'typescript'
 
-import { DEFINE_GLOBAL_FUNC_VAR, Opcode } from '../env'
+import { DEFINE_GLOBAL_FUNC_VAR, JSVarKindEnum, Opcode, OPSpecialObjectEnum } from '../env'
 import { BytecodeCompiler, EmitterContext } from './emitter'
 import { BytecodeBuffer } from './bytecode-buffer'
 import { ConstantPoolManager } from './constant-pool'
@@ -16,6 +16,19 @@ export interface FunctionTemplate {
   isGenerator: boolean
   bodyText: string
   bytecode?: Uint8Array
+}
+
+interface SpecialVarUsage {
+  usesArguments: boolean
+  usesThis: boolean
+  usesNewTarget: boolean
+}
+
+interface SpecialVarIndices {
+  argumentsVar?: number
+  thisVar?: number
+  newTargetVar?: number
+  argumentsMapped?: boolean
 }
 
 const createTemplate = (node: ts.FunctionLikeDeclarationBase, sourceFile: ts.SourceFile): FunctionTemplate => {
@@ -136,10 +149,21 @@ export class FunctionEmitter {
       constantPool,
       argMap,
       inFunction: true,
+      inArrow: ts.isArrowFunction(node),
       inAsync: Boolean(node.modifiers?.some(mod => mod.kind === ts.SyntaxKind.AsyncKeyword)),
       inGenerator: Boolean((node as ts.FunctionDeclaration | ts.FunctionExpression).asteriskToken),
       privateBindings: options.privateBindings,
     })
+
+    context.scopes.pushScope()
+    const specialUsage = this.collectSpecialVarUsage(node)
+    const hasUseStrict = this.hasUseStrictDirective(node)
+    const hasSimpleParameterList = this.hasSimpleParameterList(node)
+    const specialVars = this.registerSpecialVariables(node, context, argMap, specialUsage, {
+      hasUseStrict,
+      hasSimpleParameterList,
+    })
+    this.registerParameterLocals(node, context)
 
     if (!node.body) {
       if (context.inAsync) {
@@ -148,20 +172,29 @@ export class FunctionEmitter {
       } else {
         context.bytecode.emitOp(Opcode.OP_return_undef)
       }
+      context.scopes.popScope()
       return bytecode.toUint8Array()
     }
 
     if (ts.isBlock(node.body)) {
+      this.emitSpecialVarPrologue(specialVars, context)
       if (context.inGenerator) {
         context.bytecode.emitOp(Opcode.OP_initial_yield)
       }
       this.emitParameterInitializers(node, context, compiler)
+      const restArgName = this.getRestIdentifierName(node)
+      if (this.tryEmitRestReturn(node.body.statements, context, restArgName)) {
+        context.scopes.popScope()
+        return bytecode.toUint8Array()
+      }
       compiler.compileStatements(node.body.statements, context)
       this.ensureReturn(bytecode, context)
+      context.scopes.popScope()
       return bytecode.toUint8Array()
     }
 
     // Arrow function expression body
+    this.emitSpecialVarPrologue(specialVars, context)
     if (context.inGenerator) {
       context.bytecode.emitOp(Opcode.OP_initial_yield)
     }
@@ -172,7 +205,181 @@ export class FunctionEmitter {
     } else {
       context.bytecode.emitOp(Opcode.OP_return)
     }
+    context.scopes.popScope()
     return bytecode.toUint8Array()
+  }
+
+  private registerParameterLocals(node: ts.FunctionLikeDeclarationBase, context: EmitterContext) {
+    const seen = new Set<string>()
+
+    for (const param of node.parameters) {
+      if (ts.isIdentifier(param.name)) {
+        continue
+      }
+      this.collectBindingIdentifiers(param.name, context, seen)
+    }
+  }
+
+  private collectSpecialVarUsage(node: ts.FunctionLikeDeclarationBase): SpecialVarUsage {
+    const usage: SpecialVarUsage = { usesArguments: false, usesThis: false, usesNewTarget: false }
+    if (!node.body) return usage
+
+    const isIdentifierReference = (id: ts.Identifier): boolean => {
+      const parent = id.parent
+      if (!parent) return true
+      if (ts.isPropertyAccessExpression(parent) && parent.name === id) return false
+      if (ts.isPropertyAccessChain(parent) && parent.name === id) return false
+      if (ts.isBindingElement(parent) && parent.name === id) return false
+      if (ts.isParameter(parent) && parent.name === id) return false
+      if (ts.isVariableDeclaration(parent) && parent.name === id) return false
+      if (ts.isFunctionDeclaration(parent) && parent.name === id) return false
+      if (ts.isFunctionExpression(parent) && parent.name === id) return false
+      if (ts.isClassDeclaration(parent) && parent.name === id) return false
+      if (ts.isClassExpression(parent) && parent.name === id) return false
+      if (ts.isImportClause(parent)) return false
+      if (ts.isImportSpecifier(parent)) return false
+      if (ts.isNamespaceImport(parent)) return false
+      if (ts.isImportEqualsDeclaration(parent)) return false
+      if (ts.isExportSpecifier(parent)) return false
+      return true
+    }
+
+    const visit = (current: ts.Node, root: ts.Node) => {
+      if (current !== root && (ts.isFunctionLike(current) || ts.isClassLike(current))) return
+      if (current.kind === ts.SyntaxKind.ThisKeyword) {
+        usage.usesThis = true
+      }
+      if (ts.isMetaProperty(current)) {
+        if (current.keywordToken === ts.SyntaxKind.NewKeyword && current.name.text === 'target') {
+          usage.usesNewTarget = true
+        }
+      }
+      if (ts.isIdentifier(current) && current.text === 'arguments' && isIdentifierReference(current)) {
+        usage.usesArguments = true
+      }
+      ts.forEachChild(current, child => visit(child, root))
+    }
+
+    visit(node.body, node.body)
+    return usage
+  }
+
+  private registerSpecialVariables(
+    node: ts.FunctionLikeDeclarationBase,
+    context: EmitterContext,
+    argMap: Map<string, number>,
+    usage: SpecialVarUsage,
+    options: { hasUseStrict: boolean; hasSimpleParameterList: boolean },
+  ): SpecialVarIndices {
+    const indices: SpecialVarIndices = {}
+    if (context.inArrow) return indices
+
+    if (usage.usesNewTarget) {
+      const atom = context.getAtom('new.target')
+      const index = context.scopes.addScopeVar(atom, JSVarKindEnum.JS_VAR_NORMAL)
+      context.setSpecialVar('new.target', index)
+      indices.newTargetVar = index
+    }
+
+    if (usage.usesThis) {
+      const atom = context.getAtom('this')
+      const index = context.scopes.addScopeVar(atom, JSVarKindEnum.JS_VAR_NORMAL)
+      context.setSpecialVar('this', index)
+      indices.thisVar = index
+    }
+
+    if (usage.usesArguments && !argMap.has('arguments')) {
+      const atom = context.getAtom('arguments')
+      const index = context.scopes.addScopeVar(atom, JSVarKindEnum.JS_VAR_NORMAL)
+      context.setSpecialVar('arguments', index)
+      indices.argumentsVar = index
+      indices.argumentsMapped = !options.hasUseStrict && options.hasSimpleParameterList
+    }
+
+    return indices
+  }
+
+  private emitSpecialVarPrologue(indices: SpecialVarIndices, context: EmitterContext) {
+    if (indices.newTargetVar !== undefined) {
+      context.bytecode.emitOp(Opcode.OP_special_object)
+      context.bytecode.emitU8(OPSpecialObjectEnum.OP_SPECIAL_OBJECT_NEW_TARGET)
+      context.bytecode.emitOp(Opcode.OP_put_loc)
+      context.bytecode.emitU16(indices.newTargetVar)
+    }
+
+    if (indices.thisVar !== undefined) {
+      context.bytecode.emitOp(Opcode.OP_push_this)
+      context.bytecode.emitOp(Opcode.OP_put_loc)
+      context.bytecode.emitU16(indices.thisVar)
+    }
+
+    if (indices.argumentsVar !== undefined) {
+      context.bytecode.emitOp(Opcode.OP_special_object)
+      context.bytecode.emitU8(
+        indices.argumentsMapped
+          ? OPSpecialObjectEnum.OP_SPECIAL_OBJECT_MAPPED_ARGUMENTS
+          : OPSpecialObjectEnum.OP_SPECIAL_OBJECT_ARGUMENTS,
+      )
+      context.bytecode.emitOp(Opcode.OP_put_loc)
+      context.bytecode.emitU16(indices.argumentsVar)
+    }
+  }
+
+  private hasUseStrictDirective(node: ts.FunctionLikeDeclarationBase): boolean {
+    if (!node.body || !ts.isBlock(node.body)) return false
+    for (const stmt of node.body.statements) {
+      if (!ts.isExpressionStatement(stmt)) return false
+      const expr = stmt.expression
+      if (!ts.isStringLiteral(expr)) return false
+      if (expr.text === 'use strict') return true
+    }
+    return false
+  }
+
+  private hasSimpleParameterList(node: ts.FunctionLikeDeclarationBase): boolean {
+    for (const param of node.parameters) {
+      if (param.dotDotDotToken) return false
+      if (param.initializer) return false
+      if (!ts.isIdentifier(param.name)) return false
+    }
+    return true
+  }
+
+  private collectBindingIdentifiers(
+    name: ts.BindingName,
+    context: EmitterContext,
+    seen: Set<string>,
+  ) {
+    if (ts.isIdentifier(name)) {
+      this.registerLocalIdentifier(name, context, seen)
+      return
+    }
+
+    if (ts.isObjectBindingPattern(name)) {
+      for (const element of name.elements) {
+        if (!element) continue
+        this.collectBindingIdentifiers(element.name, context, seen)
+      }
+      return
+    }
+
+    if (ts.isArrayBindingPattern(name)) {
+      for (const element of name.elements) {
+        if (!element) continue
+        if (ts.isOmittedExpression(element)) continue
+        this.collectBindingIdentifiers(element.name, context, seen)
+      }
+    }
+  }
+
+  private registerLocalIdentifier(name: ts.Identifier, context: EmitterContext, seen: Set<string>) {
+    if (seen.has(name.text)) return
+    const atom = context.getAtom(name.text)
+    const scopeLevel = context.scopes.scopeLevel
+    if (scopeLevel >= 0 && context.scopes.findVarInScope(atom, scopeLevel) < 0) {
+      context.scopes.addScopeVar(atom, JSVarKindEnum.JS_VAR_NORMAL)
+    }
+    seen.add(name.text)
   }
 
   /**
@@ -218,8 +425,7 @@ export class FunctionEmitter {
       if (param.dotDotDotToken) {
         context.bytecode.emitOp(Opcode.OP_rest)
         context.bytecode.emitU16(index)
-        context.bytecode.emitOp(Opcode.OP_put_arg)
-        context.bytecode.emitU16(index)
+        this.emitSetArg(index, context)
         return
       }
 
@@ -228,22 +434,69 @@ export class FunctionEmitter {
       const label = context.labels.newLabel()
       context.bytecode.emitOp(Opcode.OP_get_arg)
       context.bytecode.emitU16(index)
-      context.bytecode.emitOp(Opcode.OP_dup)
       context.bytecode.emitOp(Opcode.OP_undefined)
       context.bytecode.emitOp(Opcode.OP_strict_eq)
       context.labels.emitGoto(Opcode.OP_if_false, label)
-      context.bytecode.emitOp(Opcode.OP_drop)
       compiler.emitExpression(param.initializer, context)
-      context.bytecode.emitOp(Opcode.OP_dup)
       context.bytecode.emitOp(Opcode.OP_put_arg)
       context.bytecode.emitU16(index)
       context.labels.emitLabel(label)
     })
   }
 
+  private emitSetArg(index: number, context: EmitterContext) {
+    switch (index) {
+      case 0:
+        context.bytecode.emitOp(Opcode.OP_set_arg0)
+        break
+      case 1:
+        context.bytecode.emitOp(Opcode.OP_set_arg1)
+        break
+      case 2:
+        context.bytecode.emitOp(Opcode.OP_set_arg2)
+        break
+      case 3:
+        context.bytecode.emitOp(Opcode.OP_set_arg3)
+        break
+      default:
+        context.bytecode.emitOp(Opcode.OP_set_arg)
+        context.bytecode.emitU16(index)
+        break
+    }
+  }
+
+  private getRestIdentifierName(node: ts.FunctionLikeDeclarationBase): string | undefined {
+    for (const param of node.parameters) {
+      if (param.dotDotDotToken && ts.isIdentifier(param.name)) {
+        return param.name.text
+      }
+    }
+    return undefined
+  }
+
+  private tryEmitRestReturn(
+    statements: ts.NodeArray<ts.Statement>,
+    context: EmitterContext,
+    restArgName?: string,
+  ): boolean {
+    if (!restArgName || statements.length !== 1) return false
+    const stmt = statements[0]
+    if (!ts.isReturnStatement(stmt) || !stmt.expression) return false
+    if (!ts.isIdentifier(stmt.expression)) return false
+    if (stmt.expression.text !== restArgName) return false
+
+    context.emitSourcePos(stmt)
+    context.bytecode.emitOp(context.inAsync ? Opcode.OP_return_async : Opcode.OP_return)
+    return true
+  }
+
   private ensureReturn(bytecode: BytecodeBuffer, context: EmitterContext) {
     if (bytecode.length === 0) {
-      if (context.inAsync) {
+      if (context.inAsync && context.inGenerator) {
+        context.bytecode.emitOp(Opcode.OP_undefined)
+        context.bytecode.emitOp(Opcode.OP_await)
+        context.bytecode.emitOp(Opcode.OP_return_async)
+      } else if (context.inAsync || context.inGenerator) {
         context.bytecode.emitOp(Opcode.OP_undefined)
         context.bytecode.emitOp(Opcode.OP_return_async)
       } else {
@@ -258,7 +511,11 @@ export class FunctionEmitter {
       lastOpcode !== Opcode.OP_return_undef &&
       lastOpcode !== Opcode.OP_return_async
     ) {
-      if (context.inAsync) {
+      if (context.inAsync && context.inGenerator) {
+        context.bytecode.emitOp(Opcode.OP_undefined)
+        context.bytecode.emitOp(Opcode.OP_await)
+        context.bytecode.emitOp(Opcode.OP_return_async)
+      } else if (context.inAsync || context.inGenerator) {
         context.bytecode.emitOp(Opcode.OP_undefined)
         context.bytecode.emitOp(Opcode.OP_return_async)
       } else {

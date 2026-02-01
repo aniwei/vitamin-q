@@ -1,9 +1,11 @@
 import ts from 'typescript'
 
-import { Opcode, OPSpecialObjectEnum, TempOpcode } from '../env'
+import { JS_ATOM_NULL, Opcode, OPSpecialObjectEnum, TempOpcode } from '../env'
 import type { JSAtom } from '../env'
 
 import { AssignmentEmitter } from './assignment'
+import { AsyncEmitter } from './async'
+import { GeneratorEmitter } from './generators'
 import { LiteralEmitter } from './literals'
 import { emitRegexpLiteral } from './regexp'
 import { FunctionEmitter } from './functions'
@@ -44,6 +46,8 @@ export class ExpressionEmitter {
   private literalEmitter = new LiteralEmitter()
   private functionEmitter = new FunctionEmitter()
   private classEmitter = new ClassEmitter()
+  private generatorEmitter = new GeneratorEmitter()
+  private asyncEmitter = new AsyncEmitter()
 
   /**
    * 发射表达式。
@@ -119,7 +123,13 @@ export class ExpressionEmitter {
     }
 
     if (node.kind === ts.SyntaxKind.ThisKeyword) {
-      context.bytecode.emitOp(Opcode.OP_push_this)
+      const thisIndex = context.getSpecialVar('this')
+      if (thisIndex !== undefined) {
+        context.bytecode.emitOp(Opcode.OP_get_loc)
+        context.bytecode.emitU16(thisIndex)
+      } else {
+        context.bytecode.emitOp(Opcode.OP_push_this)
+      }
       return
     }
 
@@ -132,20 +142,20 @@ export class ExpressionEmitter {
       if (!context.inGenerator) {
         throw new Error('yield 只能出现在生成器函数中')
       }
-      if (node.expression) {
-        this.emitExpression(node.expression, context)
-      } else {
-        context.bytecode.emitOp(Opcode.OP_undefined)
+      if (context.inAsync && context.inGenerator && !node.asteriskToken) {
+        this.asyncEmitter.emitAsyncGeneratorYield(node, context, this.emitExpression.bind(this))
+        return
       }
       if (node.asteriskToken) {
         if (context.inAsync && context.inGenerator) {
-          context.bytecode.emitOp(Opcode.OP_async_yield_star)
-        } else {
-          context.bytecode.emitOp(Opcode.OP_yield_star)
+          this.asyncEmitter.emitAsyncYieldStar(node.expression, context, this.emitExpression.bind(this))
+          return
         }
-      } else {
-        context.bytecode.emitOp(Opcode.OP_yield)
+        this.generatorEmitter.emitYieldStar(node.expression, context, this.emitExpression.bind(this))
+        return
       }
+
+      this.generatorEmitter.emitYieldExpression(node, context, this.emitExpression.bind(this))
       return
     }
 
@@ -155,20 +165,47 @@ export class ExpressionEmitter {
       if (scopeLevel >= 0) {
         const localIdx = context.scopes.findVarInScope(atom, scopeLevel)
         if (localIdx >= 0) {
-          context.bytecode.emitOp(Opcode.OP_get_loc)
+          const vd = context.scopes.vars[localIdx]
+          if (vd?.isLexical) {
+            context.bytecode.emitOp(Opcode.OP_get_loc_check)
+          } else {
+            context.bytecode.emitOp(Opcode.OP_get_loc)
+          }
           context.bytecode.emitU16(localIdx)
           return
         }
       }
       const argIndex = context.getArgIndex(node.text)
       if (argIndex >= 0) {
+        const { buffer } = context.bytecode.bytecode.snapshot()
+        const lastPos = context.bytecode.lastOpcodePos
+        const lastOpcode = buffer[lastPos]
+        const matchesSetArg = (() => {
+          switch (lastOpcode) {
+            case Opcode.OP_set_arg0:
+              return argIndex === 0
+            case Opcode.OP_set_arg1:
+              return argIndex === 1
+            case Opcode.OP_set_arg2:
+              return argIndex === 2
+            case Opcode.OP_set_arg3:
+              return argIndex === 3
+            case Opcode.OP_set_arg: {
+              const lo = buffer[lastPos + 1]
+              const hi = buffer[lastPos + 2]
+              const idx = lo | (hi << 8)
+              return idx === argIndex
+            }
+            default:
+              return false
+          }
+        })()
+
+        if (matchesSetArg) {
+          return
+        }
         context.bytecode.emitOp(Opcode.OP_get_arg)
         context.bytecode.emitU16(argIndex)
-        return
-      }
-      if (context.inFunction && node.text === 'arguments') {
-        context.bytecode.emitOp(Opcode.OP_special_object)
-        context.bytecode.emitU8(OPSpecialObjectEnum.OP_SPECIAL_OBJECT_ARGUMENTS)
         return
       }
       const withIdx = context.findWithVarIndex()
@@ -255,8 +292,14 @@ export class ExpressionEmitter {
         return
       }
       if (node.keywordToken === ts.SyntaxKind.NewKeyword && node.name.text === 'target') {
-        context.bytecode.emitOp(Opcode.OP_special_object)
-        context.bytecode.emitU8(OPSpecialObjectEnum.OP_SPECIAL_OBJECT_NEW_TARGET)
+        const newTargetIndex = context.getSpecialVar('new.target')
+        if (newTargetIndex !== undefined) {
+          context.bytecode.emitOp(Opcode.OP_get_loc)
+          context.bytecode.emitU16(newTargetIndex)
+        } else {
+          context.bytecode.emitOp(Opcode.OP_special_object)
+          context.bytecode.emitU8(OPSpecialObjectEnum.OP_SPECIAL_OBJECT_NEW_TARGET)
+        }
         return
       }
     }
@@ -455,7 +498,11 @@ export class ExpressionEmitter {
     }
 
     if (ts.isTypeOfExpression(node)) {
-      this.emitExpression(node.expression, context)
+      if (ts.isIdentifier(node.expression)) {
+        this.emitTypeofIdentifier(node.expression, context)
+      } else {
+        this.emitExpression(node.expression, context)
+      }
       context.bytecode.emitOp(Opcode.OP_typeof)
       return
     }
@@ -485,6 +532,17 @@ export class ExpressionEmitter {
 
     if (ts.isBinaryExpression(node)) {
       const opKind = node.operatorToken.kind
+      if (opKind === ts.SyntaxKind.InKeyword && ts.isPrivateIdentifier(node.left)) {
+        const binding = context.getPrivateBinding(node.left.text)
+        if (!binding) {
+          throw new Error(`未知的私有成员: ${node.left.text}`)
+        }
+        this.emitExpression(node.right, context)
+        context.bytecode.emitOp(Opcode.OP_get_var_ref)
+        context.bytecode.emitU16(binding.index)
+        context.bytecode.emitOp(Opcode.OP_private_in)
+        return
+      }
       if (this.isAssignmentOperator(opKind)) {
         this.assignmentEmitter.emitAssignment(node, context, this.emitExpression.bind(this))
         return
@@ -492,11 +550,9 @@ export class ExpressionEmitter {
       if (opKind === ts.SyntaxKind.AmpersandAmpersandToken) {
         this.emitExpression(node.left, context)
         context.bytecode.emitOp(Opcode.OP_dup)
-        const falseLabel = context.labels.emitGoto(Opcode.OP_if_false, -1)
+        const endLabel = context.labels.emitGoto(Opcode.OP_if_false, -1)
         context.bytecode.emitOp(Opcode.OP_drop)
         this.emitExpression(node.right, context)
-        const endLabel = context.labels.emitGoto(Opcode.OP_goto, -1)
-        context.labels.emitLabel(falseLabel)
         context.labels.emitLabel(endLabel)
         return
       }
@@ -504,11 +560,9 @@ export class ExpressionEmitter {
       if (opKind === ts.SyntaxKind.BarBarToken) {
         this.emitExpression(node.left, context)
         context.bytecode.emitOp(Opcode.OP_dup)
-        const trueLabel = context.labels.emitGoto(Opcode.OP_if_true, -1)
+        const endLabel = context.labels.emitGoto(Opcode.OP_if_true, -1)
         context.bytecode.emitOp(Opcode.OP_drop)
         this.emitExpression(node.right, context)
-        const endLabel = context.labels.emitGoto(Opcode.OP_goto, -1)
-        context.labels.emitLabel(trueLabel)
         context.labels.emitLabel(endLabel)
         return
       }
@@ -517,9 +571,7 @@ export class ExpressionEmitter {
         this.emitExpression(node.left, context)
         context.bytecode.emitOp(Opcode.OP_dup)
         context.bytecode.emitOp(Opcode.OP_is_undefined_or_null)
-        const rightLabel = context.labels.emitGoto(Opcode.OP_if_true, -1)
-        const endLabel = context.labels.emitGoto(Opcode.OP_goto, -1)
-        context.labels.emitLabel(rightLabel)
+        const endLabel = context.labels.emitGoto(Opcode.OP_if_false, -1)
         context.bytecode.emitOp(Opcode.OP_drop)
         this.emitExpression(node.right, context)
         context.labels.emitLabel(endLabel)
@@ -550,6 +602,7 @@ export class ExpressionEmitter {
     throw new Error(`未支持表达式: ${ts.SyntaxKind[node.kind]}`)
   }
 
+
   private isAssignmentOperator(kind: ts.SyntaxKind): boolean {
     switch (kind) {
       case ts.SyntaxKind.EqualsToken:
@@ -572,6 +625,32 @@ export class ExpressionEmitter {
       default:
         return false
     }
+  }
+
+  private emitTypeofIdentifier(node: ts.Identifier, context: EmitterContext) {
+    const atom = context.getAtom(node.text)
+    const scopeLevel = context.scopes.scopeLevel
+    if (scopeLevel >= 0) {
+      const localIdx = context.scopes.findVarInScope(atom, scopeLevel)
+      if (localIdx >= 0) {
+        const vd = context.scopes.vars[localIdx]
+        if (vd?.isLexical) {
+          context.bytecode.emitOp(Opcode.OP_get_loc_check)
+        } else {
+          context.bytecode.emitOp(Opcode.OP_get_loc)
+        }
+        context.bytecode.emitU16(localIdx)
+        return
+      }
+    }
+    const argIndex = context.getArgIndex(node.text)
+    if (argIndex >= 0) {
+      context.bytecode.emitOp(Opcode.OP_get_arg)
+      context.bytecode.emitU16(argIndex)
+      return
+    }
+    context.bytecode.emitOp(Opcode.OP_get_var_undef)
+    context.bytecode.emitAtom(atom)
   }
 
   private getBinaryOpcode(kind: ts.SyntaxKind): Opcode | null {

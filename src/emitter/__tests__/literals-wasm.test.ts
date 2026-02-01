@@ -123,3 +123,11 @@ test('literals: object literal shorthand aligns with wasm', async () => {
 test('literals: array literal spread aligns with wasm', async () => {
   await assertLiteralAligned('[...arr, 1];')
 })
+
+test('literals: object literal spread aligns with wasm', async () => {
+  await assertLiteralAligned('({ ...obj, a: 1 });')
+})
+
+test('literals: object literal __proto__ aligns with wasm', async () => {
+  await assertLiteralAligned('({ __proto__: proto });')
+})

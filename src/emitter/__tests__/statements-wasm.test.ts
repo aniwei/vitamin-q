@@ -234,6 +234,10 @@ test('statements: class private method call aligns with wasm', async () => {
   await assertStatementAligned('class Foo { #m(){ return 1; } call(){ this.#m(); } }', { ignoreReturn: true })
 })
 
+test('statements: class private in aligns with wasm', async () => {
+  await assertStatementAligned('class Foo { #x=1; test(obj){ return #x in obj; } }', { ignoreReturn: true })
+})
+
 test('statements: with aligns with wasm', async () => {
   await assertStatementAligned('with (obj) { x = 1; }', { ignoreReturn: true })
 })

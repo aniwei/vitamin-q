@@ -6,6 +6,7 @@ import type { ExpressionEmitterFn } from './assignment'
 import { DestructuringEmitter } from './destructuring'
 import { FunctionEmitter } from './functions'
 import { ClassEmitter } from './classes'
+import { emitAsyncGeneratorReturn } from './async'
 
 export type StatementEmitterFn = (node: ts.Statement, context: EmitterContext) => void
 
@@ -74,7 +75,28 @@ export class StatementEmitter {
     emitExpression: ExpressionEmitterFn,
   ) {
     context.emitSourcePos(node)
+    const isLexical = Boolean(node.declarationList.flags & (ts.NodeFlags.Let | ts.NodeFlags.Const))
+    const isConst = Boolean(node.declarationList.flags & ts.NodeFlags.Const)
     for (const decl of node.declarationList.declarations) {
+      const localIdx = (() => {
+        if (!context.inFunction || !isLexical || !ts.isIdentifier(decl.name)) return undefined
+        const atom = context.getAtom(decl.name.text)
+        const scopeLevel = context.scopes.scopeLevel
+        if (scopeLevel < 0) return undefined
+        const existing = context.scopes.findVarInScope(atom, scopeLevel)
+        if (existing >= 0) return existing
+        const idx = context.scopes.addScopeVar(atom, JSVarKindEnum.JS_VAR_NORMAL)
+        const vd = context.scopes.vars[idx]
+        vd.isLexical = true
+        vd.isConst = isConst
+        return idx
+      })()
+
+      if (localIdx !== undefined && (!decl.initializer || ts.isIdentifier(decl.name))) {
+        context.bytecode.emitOp(Opcode.OP_set_loc_uninitialized)
+        context.bytecode.emitU16(localIdx)
+      }
+
       if (decl.initializer && (ts.isObjectBindingPattern(decl.name) || ts.isArrayBindingPattern(decl.name))) {
         this.destructuringEmitter.emitBindingPattern(decl.name, decl.initializer, context, emitExpression)
         continue
@@ -89,8 +111,16 @@ export class StatementEmitter {
           context.bytecode.emitOp(Opcode.OP_set_name)
           context.bytecode.emitAtom(atom)
         }
-        context.bytecode.emitOp(Opcode.OP_put_var)
-        context.bytecode.emitAtom(atom)
+        if (localIdx !== undefined) {
+          context.bytecode.emitOp(Opcode.OP_put_loc)
+          context.bytecode.emitU16(localIdx)
+        } else {
+          context.bytecode.emitOp(Opcode.OP_put_var)
+          context.bytecode.emitAtom(atom)
+        }
+      } else if (localIdx !== undefined) {
+        context.bytecode.emitOp(Opcode.OP_set_loc_uninitialized)
+        context.bytecode.emitU16(localIdx)
       }
     }
   }
@@ -116,9 +146,15 @@ export class StatementEmitter {
     context.emitSourcePos(node)
     if (node.expression) {
       emitExpression(node.expression, context)
-      context.bytecode.emitOp(context.inAsync ? Opcode.OP_return_async : Opcode.OP_return)
+      if (context.inAsync && context.inGenerator) {
+        emitAsyncGeneratorReturn(context, true)
+      } else {
+        context.bytecode.emitOp((context.inAsync || context.inGenerator) ? Opcode.OP_return_async : Opcode.OP_return)
+      }
     } else {
-      if (context.inAsync) {
+      if (context.inAsync && context.inGenerator) {
+        emitAsyncGeneratorReturn(context, false)
+      } else if (context.inAsync || context.inGenerator) {
         context.bytecode.emitOp(Opcode.OP_undefined)
         context.bytecode.emitOp(Opcode.OP_return_async)
       } else {
@@ -284,8 +320,14 @@ export class StatementEmitter {
     emitStatement: StatementEmitterFn,
   ) {
     context.emitSourcePos(node)
+    const target = this.resolveForInOfTarget(node.initializer, context)
+    if (target?.needsInit && target.kind === 'loc' && target.localIdx !== undefined) {
+      context.bytecode.emitOp(Opcode.OP_set_loc_uninitialized)
+      context.bytecode.emitU16(target.localIdx)
+    }
     emitExpression(node.expression, context)
-    context.bytecode.emitOp(Opcode.OP_for_of_start)
+    const isAwait = Boolean(node.awaitModifier)
+    context.bytecode.emitOp(isAwait ? Opcode.OP_for_await_of_start : Opcode.OP_for_of_start)
 
     const bodyLabel = context.labels.newLabel()
     const testLabel = context.labels.newLabel()
@@ -294,16 +336,25 @@ export class StatementEmitter {
     context.labels.emitGoto(Opcode.OP_goto, testLabel)
     context.labels.emitLabel(bodyLabel)
 
-    this.emitForInOfTarget(node.initializer, context)
+    this.emitForInOfTarget(node.initializer, context, target)
 
+    context.pushIterator()
     this.pushLoop(breakLabel, testLabel)
     emitStatement(node.statement, context)
     this.popLoop()
+    context.popIterator()
 
     context.labels.emitLabel(testLabel)
-    context.bytecode.emitOp(Opcode.OP_for_of_next)
-    context.bytecode.emitU8(FOR_OF_NEXT_OPERAND_DEFAULT)
-    context.labels.emitGoto(Opcode.OP_if_false, bodyLabel)
+    if (isAwait) {
+      context.bytecode.emitOp(Opcode.OP_for_await_of_next)
+      context.bytecode.emitOp(Opcode.OP_await)
+      context.bytecode.emitOp(Opcode.OP_iterator_get_value_done)
+      context.labels.emitGoto(Opcode.OP_if_false, bodyLabel)
+    } else {
+      context.bytecode.emitOp(Opcode.OP_for_of_next)
+      context.bytecode.emitU8(FOR_OF_NEXT_OPERAND_DEFAULT)
+      context.labels.emitGoto(Opcode.OP_if_false, bodyLabel)
+    }
 
     context.labels.emitLabel(breakLabel)
     context.bytecode.emitOp(Opcode.OP_drop)
@@ -445,7 +496,22 @@ export class StatementEmitter {
     context.labels.emitGoto(Opcode.OP_goto, loop.continueLabel)
   }
 
-  private emitForInOfTarget(initializer: ts.ForInitializer, context: EmitterContext) {
+  private emitForInOfTarget(
+    initializer: ts.ForInitializer,
+    context: EmitterContext,
+    target?: { kind: 'loc' | 'var'; localIdx?: number; atom?: number },
+  ) {
+    if (target?.kind === 'loc' && target.localIdx !== undefined) {
+      context.bytecode.emitOp(Opcode.OP_put_loc)
+      context.bytecode.emitU16(target.localIdx)
+      return
+    }
+    if (target?.kind === 'var' && target.atom !== undefined) {
+      context.bytecode.emitOp(Opcode.OP_put_var)
+      context.bytecode.emitAtom(target.atom)
+      return
+    }
+
     if (ts.isVariableDeclarationList(initializer)) {
       const decl = initializer.declarations[0]
       if (!decl || !ts.isIdentifier(decl.name)) {
@@ -465,5 +531,28 @@ export class StatementEmitter {
     }
 
     throw new Error(`未支持的 for-in/of 赋值目标: ${ts.SyntaxKind[initializer.kind]}`)
+  }
+
+  private resolveForInOfTarget(initializer: ts.ForInitializer, context: EmitterContext) {
+    if (!ts.isVariableDeclarationList(initializer)) return undefined
+    const decl = initializer.declarations[0]
+    if (!decl || !ts.isIdentifier(decl.name)) {
+      throw new Error(`未支持的 for-in/of 变量声明: ${decl?.name ? ts.SyntaxKind[decl.name.kind] : '未知'}`)
+    }
+
+    const atom = context.getAtom(decl.name.text)
+    const isLexical = Boolean(initializer.flags & (ts.NodeFlags.Let | ts.NodeFlags.Const))
+    const isConst = Boolean(initializer.flags & ts.NodeFlags.Const)
+    if (isLexical && context.scopes.scopeLevel >= 0) {
+      const scopeLevel = context.scopes.scopeLevel
+      const existing = context.scopes.findVarInScope(atom, scopeLevel)
+      const localIdx = existing >= 0 ? existing : context.scopes.addScopeVar(atom, JSVarKindEnum.JS_VAR_NORMAL)
+      const vd = context.scopes.vars[localIdx]
+      vd.isLexical = true
+      vd.isConst = isConst
+      return { kind: 'loc' as const, localIdx, needsInit: existing < 0 }
+    }
+
+    return { kind: 'var' as const, atom }
   }
 }

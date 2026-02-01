@@ -83,6 +83,10 @@ const normalizeOpcodes = (ops: string[]): string[] => {
     if_false8: 'if_false',
     goto8: 'goto',
     call2: 'call',
+    get_arg0: 'get_arg',
+    get_arg1: 'get_arg',
+    get_arg2: 'get_arg',
+    get_arg3: 'get_arg',
   }
 
   return ops
@@ -126,4 +130,28 @@ test('expressions: call expression aligns with wasm', async () => {
 
 test('expressions: regexp literal aligns with wasm', async () => {
   await assertExpressionAligned('/ab+/gi;')
+})
+
+test('expressions: conditional expression aligns with wasm', async () => {
+  await assertExpressionAligned('cond ? a : b;')
+})
+
+test('expressions: logical and aligns with wasm', async () => {
+  await assertExpressionAligned('a && b;')
+})
+
+test('expressions: logical or aligns with wasm', async () => {
+  await assertExpressionAligned('a || b;')
+})
+
+test('expressions: nullish coalescing aligns with wasm', async () => {
+  await assertExpressionAligned('a ?? b;')
+})
+
+test('expressions: element access aligns with wasm', async () => {
+  await assertExpressionAligned('obj["x"];')
+})
+
+test('expressions: unary typeof aligns with wasm', async () => {
+  await assertExpressionAligned('typeof value;')
 })
