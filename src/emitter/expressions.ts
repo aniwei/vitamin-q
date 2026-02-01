@@ -329,6 +329,7 @@ export class ExpressionEmitter {
 
     if (ts.isNewExpression(node)) {
       this.emitExpression(node.expression, context)
+      context.bytecode.emitOp(Opcode.OP_dup)
       const args = node.arguments ?? []
       for (const arg of args) {
         this.emitExpression(arg, context)
@@ -513,20 +514,46 @@ export class ExpressionEmitter {
       return
     }
 
+    if (ts.isAsExpression(node) || ts.isTypeAssertionExpression(node)) {
+      this.emitExpression(node.expression, context)
+      return
+    }
+
     if (ts.isPrefixUnaryExpression(node)) {
-      this.emitExpression(node.operand, context)
       switch (node.operator) {
+        case ts.SyntaxKind.PlusPlusToken:
+          this.emitUpdateExpression(node.operand, context, true, true)
+          return
+        case ts.SyntaxKind.MinusMinusToken:
+          this.emitUpdateExpression(node.operand, context, true, false)
+          return
         case ts.SyntaxKind.ExclamationToken:
-          context.bytecode.emitOp(Opcode.OP_not)
+          this.emitExpression(node.operand, context)
+          context.bytecode.emitOp(Opcode.OP_lnot)
           return
         case ts.SyntaxKind.MinusToken:
+          this.emitExpression(node.operand, context)
           context.bytecode.emitOp(Opcode.OP_neg)
           return
         case ts.SyntaxKind.TildeToken:
+          this.emitExpression(node.operand, context)
           context.bytecode.emitOp(Opcode.OP_not)
           return
         default:
           throw new Error(`未支持的一元运算符: ${ts.SyntaxKind[node.operator]}`)
+      }
+    }
+
+    if (ts.isPostfixUnaryExpression(node)) {
+      switch (node.operator) {
+        case ts.SyntaxKind.PlusPlusToken:
+          this.emitUpdateExpression(node.operand, context, false, true)
+          return
+        case ts.SyntaxKind.MinusMinusToken:
+          this.emitUpdateExpression(node.operand, context, false, false)
+          return
+        default:
+          throw new Error(`未支持的后缀一元运算符: ${ts.SyntaxKind[node.operator]}`)
       }
     }
 
@@ -650,6 +677,114 @@ export class ExpressionEmitter {
       return
     }
     context.bytecode.emitOp(Opcode.OP_get_var_undef)
+    context.bytecode.emitAtom(atom)
+  }
+
+  private emitUpdateExpression(
+    operand: ts.Expression,
+    context: EmitterContext,
+    isPrefix: boolean,
+    isInc: boolean,
+  ) {
+    if (ts.isIdentifier(operand)) {
+      this.emitUpdateIdentifier(operand, context, isPrefix, isInc)
+      return
+    }
+    if (ts.isPropertyAccessExpression(operand)) {
+      if (ts.isPrivateIdentifier(operand.name)) {
+        const binding = context.getPrivateBinding(operand.name.text)
+        if (!binding) {
+          throw new Error(`未知的私有成员: ${operand.name.text}`)
+        }
+        if (binding.kind !== 'field') {
+          throw new Error(`未支持的私有成员更新: ${operand.name.text}`)
+        }
+        this.emitExpression(operand.expression, context)
+        context.bytecode.emitOp(Opcode.OP_get_var_ref)
+        context.bytecode.emitU16(binding.index)
+        context.bytecode.emitOp(Opcode.OP_get_private_field)
+        context.bytecode.emitOp(isPrefix ? (isInc ? Opcode.OP_inc : Opcode.OP_dec) : (isInc ? Opcode.OP_post_inc : Opcode.OP_post_dec))
+        if (isPrefix) {
+          context.bytecode.emitOp(Opcode.OP_dup)
+        }
+        context.bytecode.emitOp(Opcode.OP_insert2)
+        context.bytecode.emitOp(Opcode.OP_get_var_ref)
+        context.bytecode.emitU16(binding.index)
+        context.bytecode.emitOp(Opcode.OP_put_private_field)
+        return
+      }
+      this.emitExpression(operand.expression, context)
+      const atom = context.getAtom(operand.name.text)
+      context.bytecode.emitOp(Opcode.OP_get_field2)
+      context.bytecode.emitAtom(atom)
+      context.bytecode.emitOp(isPrefix ? (isInc ? Opcode.OP_inc : Opcode.OP_dec) : (isInc ? Opcode.OP_post_inc : Opcode.OP_post_dec))
+      if (isPrefix) {
+        context.bytecode.emitOp(Opcode.OP_dup)
+      }
+      context.bytecode.emitOp(Opcode.OP_insert2)
+      context.bytecode.emitOp(Opcode.OP_put_field)
+      context.bytecode.emitAtom(atom)
+      return
+    }
+    if (ts.isElementAccessExpression(operand)) {
+      this.emitExpression(operand.expression, context)
+      this.emitExpression(operand.argumentExpression, context)
+      context.bytecode.emitOp(Opcode.OP_get_array_el3)
+      context.bytecode.emitOp(isPrefix ? (isInc ? Opcode.OP_inc : Opcode.OP_dec) : (isInc ? Opcode.OP_post_inc : Opcode.OP_post_dec))
+      if (isPrefix) {
+        context.bytecode.emitOp(Opcode.OP_dup)
+      }
+      context.bytecode.emitOp(Opcode.OP_insert3)
+      context.bytecode.emitOp(Opcode.OP_put_array_el)
+      return
+    }
+    throw new Error(`未支持的更新表达式目标: ${ts.SyntaxKind[operand.kind]}`)
+  }
+
+  private emitUpdateIdentifier(
+    node: ts.Identifier,
+    context: EmitterContext,
+    isPrefix: boolean,
+    isInc: boolean,
+  ) {
+    const atom = context.getAtom(node.text)
+    const scopeLevel = context.scopes.scopeLevel
+    if (scopeLevel >= 0) {
+      const localIdx = context.scopes.findVarInScope(atom, scopeLevel)
+      if (localIdx >= 0) {
+        const vd = context.scopes.vars[localIdx]
+        context.bytecode.emitOp(vd?.isLexical ? Opcode.OP_get_loc_check : Opcode.OP_get_loc)
+        context.bytecode.emitU16(localIdx)
+        context.bytecode.emitOp(isPrefix ? (isInc ? Opcode.OP_inc : Opcode.OP_dec) : (isInc ? Opcode.OP_post_inc : Opcode.OP_post_dec))
+        if (isPrefix) {
+          context.bytecode.emitOp(Opcode.OP_dup)
+        }
+        context.bytecode.emitOp(vd?.isLexical ? Opcode.OP_put_loc_check : Opcode.OP_put_loc)
+        context.bytecode.emitU16(localIdx)
+        return
+      }
+    }
+
+    const argIndex = context.getArgIndex(node.text)
+    if (argIndex >= 0) {
+      context.bytecode.emitOp(Opcode.OP_get_arg)
+      context.bytecode.emitU16(argIndex)
+      context.bytecode.emitOp(isPrefix ? (isInc ? Opcode.OP_inc : Opcode.OP_dec) : (isInc ? Opcode.OP_post_inc : Opcode.OP_post_dec))
+      if (isPrefix) {
+        context.bytecode.emitOp(Opcode.OP_dup)
+      }
+      context.bytecode.emitOp(Opcode.OP_put_arg)
+      context.bytecode.emitU16(argIndex)
+      return
+    }
+
+    context.bytecode.emitOp(Opcode.OP_get_var)
+    context.bytecode.emitAtom(atom)
+    context.bytecode.emitOp(isPrefix ? (isInc ? Opcode.OP_inc : Opcode.OP_dec) : (isInc ? Opcode.OP_post_inc : Opcode.OP_post_dec))
+    if (isPrefix) {
+      context.bytecode.emitOp(Opcode.OP_dup)
+    }
+    context.bytecode.emitOp(Opcode.OP_put_var)
     context.bytecode.emitAtom(atom)
   }
 

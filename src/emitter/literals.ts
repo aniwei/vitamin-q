@@ -1,8 +1,16 @@
 import ts from 'typescript'
 
-import { COPY_DATA_PROPERTIES_OPERAND_SPREAD, Opcode } from '../env'
+import {
+  COPY_DATA_PROPERTIES_OPERAND_SPREAD,
+  OP_DEFINE_METHOD_ENUMERABLE,
+  OP_DEFINE_METHOD_GETTER,
+  OP_DEFINE_METHOD_METHOD,
+  OP_DEFINE_METHOD_SETTER,
+  Opcode,
+} from '../env'
 import type { EmitterContext } from './emitter'
 import type { ExpressionEmitterFn } from './assignment'
+import { FunctionEmitter } from './functions'
 
 /**
  * 字面量发射器（对象/数组）。
@@ -13,6 +21,8 @@ import type { ExpressionEmitterFn } from './assignment'
  * @see js_parse_object_literal
  */
 export class LiteralEmitter {
+  private functionEmitter = new FunctionEmitter()
+
   emitArrayLiteral(node: ts.ArrayLiteralExpression, context: EmitterContext, emitExpression: ExpressionEmitterFn) {
     const elements = node.elements
     const hasSpread = elements.some(element => ts.isSpreadElement(element))
@@ -27,34 +37,84 @@ export class LiteralEmitter {
       return
     }
 
+    if (hasSpread) {
+      let prefixCount = 0
+      while (prefixCount < elements.length) {
+        const element = elements[prefixCount]
+        if (ts.isSpreadElement(element) || element.kind === ts.SyntaxKind.OmittedExpression) {
+          break
+        }
+        prefixCount += 1
+      }
+
+      if (prefixCount > 0) {
+        for (let i = 0; i < prefixCount; i += 1) {
+          emitExpression(elements[i] as ts.Expression, context)
+        }
+        context.bytecode.emitOp(Opcode.OP_array_from)
+        context.bytecode.emitU16(prefixCount)
+      } else {
+        context.bytecode.emitOp(Opcode.OP_array_from)
+        context.bytecode.emitU16(0)
+      }
+
+      context.bytecode.emitOp(Opcode.OP_push_i32)
+      context.bytecode.emitU32(prefixCount)
+
+      let trailingHole = false
+      for (let i = prefixCount; i < elements.length; i += 1) {
+        const element = elements[i]
+        if (ts.isSpreadElement(element)) {
+          trailingHole = false
+          emitExpression(element.expression, context)
+          context.bytecode.emitOp(Opcode.OP_append)
+          continue
+        }
+
+        if (element.kind === ts.SyntaxKind.OmittedExpression) {
+          trailingHole = true
+          context.bytecode.emitOp(Opcode.OP_inc)
+          continue
+        }
+
+        trailingHole = false
+        emitExpression(element as ts.Expression, context)
+        context.bytecode.emitOp(Opcode.OP_define_array_el)
+        context.bytecode.emitOp(Opcode.OP_inc)
+      }
+
+      if (trailingHole) {
+        const lengthAtom = context.getAtom('length')
+        context.bytecode.emitOp(Opcode.OP_dup1)
+        context.bytecode.emitOp(Opcode.OP_put_field)
+        context.bytecode.emitAtom(lengthAtom)
+        context.bytecode.emitIC(lengthAtom)
+      } else {
+        context.bytecode.emitOp(Opcode.OP_drop)
+      }
+      return
+    }
+
     context.bytecode.emitOp(Opcode.OP_array_from)
     context.bytecode.emitU16(0)
     context.bytecode.emitOp(Opcode.OP_push_i32)
     context.bytecode.emitU32(0)
 
-    let needLength = false
+    let trailingHole = false
     for (const element of elements) {
-      if (ts.isSpreadElement(element)) {
-        needLength = true
-        emitExpression(element.expression, context)
-        context.bytecode.emitOp(Opcode.OP_append)
-        continue
-      }
-
       if (element.kind === ts.SyntaxKind.OmittedExpression) {
-        needLength = true
+        trailingHole = true
         context.bytecode.emitOp(Opcode.OP_inc)
         continue
       }
 
-      needLength = true
+      trailingHole = false
       emitExpression(element as ts.Expression, context)
       context.bytecode.emitOp(Opcode.OP_define_array_el)
-      needLength = false
       context.bytecode.emitOp(Opcode.OP_inc)
     }
 
-    if (needLength) {
+    if (trailingHole) {
       const lengthAtom = context.getAtom('length')
       context.bytecode.emitOp(Opcode.OP_dup1)
       context.bytecode.emitOp(Opcode.OP_put_field)
@@ -69,6 +129,31 @@ export class LiteralEmitter {
     context.bytecode.emitOp(Opcode.OP_object)
 
     for (const prop of node.properties) {
+      if (ts.isMethodDeclaration(prop) || ts.isGetAccessorDeclaration(prop) || ts.isSetAccessorDeclaration(prop)) {
+        const isComputed = ts.isComputedPropertyName(prop.name)
+        const opFlags = ts.isGetAccessorDeclaration(prop)
+          ? OP_DEFINE_METHOD_GETTER
+          : ts.isSetAccessorDeclaration(prop)
+              ? OP_DEFINE_METHOD_SETTER
+              : OP_DEFINE_METHOD_METHOD
+
+        if (isComputed) {
+          emitExpression((prop.name as ts.ComputedPropertyName).expression, context)
+          context.bytecode.emitOp(Opcode.OP_to_propkey)
+        }
+
+        this.functionEmitter.emitFunctionClosure(prop, context)
+
+        if (isComputed) {
+          context.bytecode.emitOp(Opcode.OP_define_method_computed)
+        } else {
+          context.bytecode.emitOp(Opcode.OP_define_method)
+          context.bytecode.emitAtom(context.getAtom(this.getPropertyNameText(prop.name)))
+        }
+        context.bytecode.emitU8(opFlags | OP_DEFINE_METHOD_ENUMERABLE)
+        continue
+      }
+
       if (ts.isPropertyAssignment(prop)) {
         if (ts.isComputedPropertyName(prop.name)) {
           emitExpression(prop.name.expression, context)
@@ -87,6 +172,13 @@ export class LiteralEmitter {
         }
 
         emitExpression(prop.initializer, context)
+        if (
+          (ts.isFunctionExpression(prop.initializer) && !prop.initializer.name) ||
+          ts.isArrowFunction(prop.initializer)
+        ) {
+          context.bytecode.emitOp(Opcode.OP_set_name)
+          context.bytecode.emitAtom(context.getAtom(nameText))
+        }
         context.bytecode.emitOp(Opcode.OP_define_field)
         context.bytecode.emitAtom(context.getAtom(nameText))
         continue

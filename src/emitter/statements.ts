@@ -114,6 +114,9 @@ export class StatementEmitter {
         if (localIdx !== undefined) {
           context.bytecode.emitOp(Opcode.OP_put_loc)
           context.bytecode.emitU16(localIdx)
+        } else if (isLexical) {
+          context.bytecode.emitOp(Opcode.OP_put_var_init)
+          context.bytecode.emitAtom(atom)
         } else {
           context.bytecode.emitOp(Opcode.OP_put_var)
           context.bytecode.emitAtom(atom)
@@ -121,6 +124,10 @@ export class StatementEmitter {
       } else if (localIdx !== undefined) {
         context.bytecode.emitOp(Opcode.OP_set_loc_uninitialized)
         context.bytecode.emitU16(localIdx)
+      } else if (isLexical) {
+        context.bytecode.emitOp(Opcode.OP_undefined)
+        context.bytecode.emitOp(Opcode.OP_put_var_init)
+        context.bytecode.emitAtom(atom)
       }
     }
   }
@@ -298,7 +305,7 @@ export class StatementEmitter {
     context.labels.emitGoto(Opcode.OP_goto, testLabel)
     context.labels.emitLabel(bodyLabel)
 
-    this.emitForInOfTarget(node.initializer, context)
+    this.emitForInOfTarget(node.initializer, context, emitExpression)
 
     this.pushLoop(breakLabel, testLabel)
     emitStatement(node.statement, context)
@@ -336,7 +343,7 @@ export class StatementEmitter {
     context.labels.emitGoto(Opcode.OP_goto, testLabel)
     context.labels.emitLabel(bodyLabel)
 
-    this.emitForInOfTarget(node.initializer, context, target)
+    this.emitForInOfTarget(node.initializer, context, emitExpression, target)
 
     context.pushIterator()
     this.pushLoop(breakLabel, testLabel)
@@ -473,6 +480,7 @@ export class StatementEmitter {
     context.labels.emitLabel(updateLabel)
     if (node.incrementor) {
       emitExpression(node.incrementor, context)
+      context.bytecode.emitOp(Opcode.OP_drop)
     }
     context.labels.emitGoto(Opcode.OP_goto, testLabel)
     context.labels.emitLabel(endLabel)
@@ -499,7 +507,8 @@ export class StatementEmitter {
   private emitForInOfTarget(
     initializer: ts.ForInitializer,
     context: EmitterContext,
-    target?: { kind: 'loc' | 'var'; localIdx?: number; atom?: number },
+    emitExpression: ExpressionEmitterFn,
+    target?: { kind: 'loc' | 'var' | 'pattern'; localIdx?: number; atom?: number; pattern?: ts.ObjectBindingPattern | ts.ArrayBindingPattern },
   ) {
     if (target?.kind === 'loc' && target.localIdx !== undefined) {
       context.bytecode.emitOp(Opcode.OP_put_loc)
@@ -511,16 +520,27 @@ export class StatementEmitter {
       context.bytecode.emitAtom(target.atom)
       return
     }
+    if (target?.kind === 'pattern' && target.pattern) {
+      this.destructuringEmitter.emitBindingPatternFromValue(target.pattern, context, emitExpression)
+      return
+    }
 
     if (ts.isVariableDeclarationList(initializer)) {
       const decl = initializer.declarations[0]
-      if (!decl || !ts.isIdentifier(decl.name)) {
-        throw new Error(`未支持的 for-in/of 变量声明: ${decl?.name ? ts.SyntaxKind[decl.name.kind] : '未知'}`)
+      if (!decl) {
+        throw new Error('未支持的 for-in/of 变量声明: 未知')
       }
-      const atom = context.getAtom(decl.name.text)
-      context.bytecode.emitOp(Opcode.OP_put_var)
-      context.bytecode.emitAtom(atom)
-      return
+      if (ts.isIdentifier(decl.name)) {
+        const atom = context.getAtom(decl.name.text)
+        context.bytecode.emitOp(Opcode.OP_put_var)
+        context.bytecode.emitAtom(atom)
+        return
+      }
+      if (ts.isObjectBindingPattern(decl.name) || ts.isArrayBindingPattern(decl.name)) {
+        this.destructuringEmitter.emitBindingPatternFromValue(decl.name, context, emitExpression)
+        return
+      }
+      throw new Error(`未支持的 for-in/of 变量声明: ${ts.SyntaxKind[decl.name.kind]}`)
     }
 
     if (ts.isIdentifier(initializer)) {
@@ -536,8 +556,14 @@ export class StatementEmitter {
   private resolveForInOfTarget(initializer: ts.ForInitializer, context: EmitterContext) {
     if (!ts.isVariableDeclarationList(initializer)) return undefined
     const decl = initializer.declarations[0]
-    if (!decl || !ts.isIdentifier(decl.name)) {
-      throw new Error(`未支持的 for-in/of 变量声明: ${decl?.name ? ts.SyntaxKind[decl.name.kind] : '未知'}`)
+    if (!decl) {
+      throw new Error('未支持的 for-in/of 变量声明: 未知')
+    }
+    if (ts.isObjectBindingPattern(decl.name) || ts.isArrayBindingPattern(decl.name)) {
+      return { kind: 'pattern' as const, pattern: decl.name }
+    }
+    if (!ts.isIdentifier(decl.name)) {
+      throw new Error(`未支持的 for-in/of 变量声明: ${ts.SyntaxKind[decl.name.kind]}`)
     }
 
     const atom = context.getAtom(decl.name.text)

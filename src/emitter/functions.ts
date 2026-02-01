@@ -416,7 +416,7 @@ export class FunctionEmitter {
           context.labels.emitLabel(label)
         }
 
-        this.destructuringEmitter.emitBindingPatternFromValue(param.name, context)
+        this.destructuringEmitter.emitBindingPatternFromValue(param.name, context, compiler.emitExpression.bind(compiler))
         return
       }
 

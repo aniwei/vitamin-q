@@ -95,6 +95,7 @@ export class ClassEmitter {
 
     const classNameLoc = className ? context.allocateTempLocal() : -1
     const classFieldsLoc = context.allocateTempLocal()
+    const shouldCloseClassName = Boolean(className && this.classNameIsReferenced(node, className))
 
     const { methods, accessors, fields, staticBlocks, privateBindings } = this.collectMembers(node)
     const computedInstanceFields = fields.filter(field => !field.isStatic && field.isComputed)
@@ -103,6 +104,7 @@ export class ClassEmitter {
     const computedInstanceLocals = new Map<ClassFieldDef, number>()
     const computedStaticLocals = new Map<ClassFieldDef, number>()
     const privateBindingInfo = new Map<string, { index: number; kind: 'field' | 'method' | 'accessor' }>()
+    const privateFieldLocals = new Map<string, number>()
 
     for (const field of computedStaticFields) {
       computedStaticLocals.set(field, context.allocateTempLocal())
@@ -117,6 +119,9 @@ export class ClassEmitter {
       if (!privateBindingInfo.has(binding.name)) {
         privateBindingInfo.set(binding.name, { index: privateIndex, kind: binding.kind })
         privateIndex += 1
+      }
+      if (binding.kind === 'field') {
+        privateFieldLocals.set(`${binding.name}:${binding.isStatic ? 'static' : 'instance'}`, binding.local)
       }
     }
 
@@ -161,6 +166,29 @@ export class ClassEmitter {
     context.bytecode.emitAtom(classAtom)
     context.bytecode.emitU8(classFlags)
 
+    for (const field of fields) {
+      if (ts.isPrivateIdentifier(field.name)) {
+        const local = privateFieldLocals.get(`${field.name.text}:${field.isStatic ? 'static' : 'instance'}`)
+        if (local === undefined) continue
+        if (field.isStatic) {
+          context.bytecode.emitOp(Opcode.OP_swap)
+        }
+        context.bytecode.emitOp(Opcode.OP_private_symbol)
+        context.bytecode.emitAtom(context.getAtom(field.name.text))
+        context.bytecode.emitOp(Opcode.OP_put_loc)
+        context.bytecode.emitU16(local)
+        if (field.isStatic) {
+          context.bytecode.emitOp(Opcode.OP_swap)
+        }
+        continue
+      }
+
+      if (field.isStatic && !field.isComputed) {
+        context.bytecode.emitOp(Opcode.OP_swap)
+        context.bytecode.emitOp(Opcode.OP_swap)
+      }
+    }
+
     for (const field of computedInstanceFields) {
       const local = computedInstanceLocals.get(field) ?? -1
       emitExpression(this.getComputedNameExpression(field.name), context)
@@ -181,23 +209,25 @@ export class ClassEmitter {
     }
 
     for (const binding of privateBindings) {
-      if (binding.kind === 'field') {
-        context.bytecode.emitOp(Opcode.OP_private_symbol)
+      if (binding.kind !== 'method' && binding.kind !== 'accessor') continue
+      if (!binding.node) continue
+      if (binding.isStatic) {
+        context.bytecode.emitOp(Opcode.OP_swap)
+      }
+      this.functionEmitter.emitFunctionClosure(binding.node, context, { privateBindings: privateBindingInfo })
+      context.bytecode.emitOp(Opcode.OP_set_home_object)
+      if (binding.kind === 'method') {
+        context.bytecode.emitOp(Opcode.OP_set_name)
         context.bytecode.emitAtom(context.getAtom(binding.name))
         context.bytecode.emitOp(Opcode.OP_put_loc)
         context.bytecode.emitU16(binding.local)
+      } else {
+        context.bytecode.emitOp(Opcode.OP_put_loc)
+        context.bytecode.emitU16(binding.local)
       }
-    }
-
-    for (const binding of privateBindings) {
-      if (binding.kind !== 'method' && binding.kind !== 'accessor') continue
-      if (!binding.node) continue
-      this.functionEmitter.emitFunctionClosure(binding.node, context, { privateBindings: privateBindingInfo })
-      context.bytecode.emitOp(Opcode.OP_set_home_object)
-      context.bytecode.emitOp(Opcode.OP_set_name)
-      context.bytecode.emitAtom(context.getAtom(binding.name))
-      context.bytecode.emitOp(Opcode.OP_put_loc)
-      context.bytecode.emitU16(binding.local)
+      if (binding.isStatic) {
+        context.bytecode.emitOp(Opcode.OP_swap)
+      }
     }
 
     for (const method of methods) {
@@ -246,7 +276,7 @@ export class ClassEmitter {
     if (instanceFields.length > 0 || needsBrand) {
       const template = this.buildFieldsInitTemplate(instanceFields, context, emitExpression, {
         isStatic: false,
-        privateBindings,
+        privateBindings: privateBindingInfo,
       })
       const idx = context.constantPool.add(template)
       context.bytecode.emitOp(Opcode.OP_fclosure)
@@ -261,6 +291,13 @@ export class ClassEmitter {
     }
     context.bytecode.emitOp(Opcode.OP_drop)
 
+    const staticNeedsBrand = privateBindings.some(binding => binding.isStatic && binding.kind !== 'field')
+    if (staticNeedsBrand) {
+      context.bytecode.emitOp(Opcode.OP_dup)
+      context.bytecode.emitOp(Opcode.OP_dup)
+      context.bytecode.emitOp(Opcode.OP_add_brand)
+    }
+
     if (classNameLoc >= 0) {
       context.bytecode.emitOp(Opcode.OP_set_loc)
       context.bytecode.emitU16(classNameLoc)
@@ -270,7 +307,7 @@ export class ClassEmitter {
     if (staticFields.length > 0 || staticBlocks.length > 0) {
       const staticTemplate = this.buildFieldsInitTemplate(staticFields, context, emitExpression, {
         isStatic: true,
-        privateBindings,
+        privateBindings: privateBindingInfo,
         staticBlocks,
       })
       const idx = context.constantPool.add(staticTemplate)
@@ -283,15 +320,13 @@ export class ClassEmitter {
       context.bytecode.emitOp(Opcode.OP_drop)
     }
 
-    const staticNeedsBrand = privateBindings.some(binding => binding.isStatic)
-    if (staticNeedsBrand) {
-      context.bytecode.emitOp(Opcode.OP_dup)
-      context.bytecode.emitOp(Opcode.OP_dup)
-      context.bytecode.emitOp(Opcode.OP_add_brand)
-    }
-
     context.bytecode.emitOp(Opcode.OP_close_loc)
     context.bytecode.emitU16(classFieldsLoc)
+
+    if (classNameLoc >= 0 && shouldCloseClassName) {
+      context.bytecode.emitOp(Opcode.OP_close_loc)
+      context.bytecode.emitU16(classNameLoc)
+    }
 
     for (const field of computedStaticFields) {
       const local = computedStaticLocals.get(field) ?? -1
@@ -317,6 +352,69 @@ export class ClassEmitter {
     } else {
       context.bytecode.emitOp(Opcode.OP_drop)
     }
+  }
+
+  private classNameIsReferenced(node: ts.ClassLikeDeclaration, className: string): boolean {
+    const isIdentifierReference = (id: ts.Identifier): boolean => {
+      const parent = id.parent
+      if (!parent) return false
+      if (ts.isPropertyAccessExpression(parent) && parent.name === id) return false
+      if (ts.isPropertyAccessChain(parent) && parent.name === id) return false
+      if (ts.isPropertyAssignment(parent) && parent.name === id) return false
+      if (ts.isPropertyDeclaration(parent) && parent.name === id) return false
+      if (ts.isMethodDeclaration(parent) && parent.name === id) return false
+      if (ts.isGetAccessorDeclaration(parent) && parent.name === id) return false
+      if (ts.isSetAccessorDeclaration(parent) && parent.name === id) return false
+      if (ts.isBindingElement(parent) && parent.name === id) return false
+      if (ts.isParameter(parent) && parent.name === id) return false
+      if (ts.isVariableDeclaration(parent) && parent.name === id) return false
+      if (ts.isFunctionDeclaration(parent) && parent.name === id) return false
+      if (ts.isFunctionExpression(parent) && parent.name === id) return false
+      if (ts.isClassDeclaration(parent) && parent.name === id) return false
+      if (ts.isClassExpression(parent) && parent.name === id) return false
+      if (ts.isImportClause(parent)) return false
+      if (ts.isImportSpecifier(parent)) return false
+      if (ts.isNamespaceImport(parent)) return false
+      if (ts.isImportEqualsDeclaration(parent)) return false
+      if (ts.isExportSpecifier(parent)) return false
+      return true
+    }
+
+    let referenced = false
+    const visit = (current: ts.Node) => {
+      if (referenced) return
+      if (ts.isIdentifier(current) && current.text === className && isIdentifierReference(current)) {
+        referenced = true
+        return
+      }
+      ts.forEachChild(current, visit)
+    }
+
+    for (const member of node.members) {
+      if (ts.isConstructorDeclaration(member)) {
+        if (member.body) visit(member.body)
+        continue
+      }
+      if (ts.isClassStaticBlockDeclaration(member)) {
+        visit(member.body)
+        continue
+      }
+      if (ts.isMethodDeclaration(member) || ts.isGetAccessorDeclaration(member) || ts.isSetAccessorDeclaration(member)) {
+        if (ts.isComputedPropertyName(member.name)) {
+          visit(member.name.expression)
+        }
+        if (member.body) visit(member.body)
+        continue
+      }
+      if (ts.isPropertyDeclaration(member)) {
+        if (ts.isComputedPropertyName(member.name)) {
+          visit(member.name.expression)
+        }
+        if (member.initializer) visit(member.initializer)
+      }
+    }
+
+    return referenced
   }
 
   private getConstructorTemplate(
@@ -395,6 +493,7 @@ export class ClassEmitter {
 
     return { methods, accessors, fields, staticBlocks, privateBindings }
   }
+
 
   private buildDefaultConstructorTemplate(context: EmitterContext, isDerived: boolean): FunctionTemplate {
     const bytecode = new BytecodeBuffer()
@@ -543,7 +642,7 @@ export class ClassEmitter {
     fields: ClassFieldDef[],
     context: EmitterContext,
     emitExpression: ClassExpressionEmitterFn,
-    options: { isStatic: boolean; privateBindings: PrivateBinding[]; staticBlocks?: ClassStaticBlockDef[] },
+    options: { isStatic: boolean; privateBindings: Map<string, { index: number; kind: 'field' | 'method' | 'accessor' }>; staticBlocks?: ClassStaticBlockDef[] },
   ): FunctionTemplate {
     const bytecode = new BytecodeBuffer()
     const inlineCache = new InlineCacheManager()
@@ -562,6 +661,7 @@ export class ClassEmitter {
       constantPool,
       bytecode,
       inFunction: true,
+      privateBindings: options.privateBindings,
     })
 
     if (!options.isStatic) {

@@ -1,6 +1,6 @@
 import ts from 'typescript'
 
-import { Opcode } from '../env'
+import { COPY_DATA_PROPERTIES_FLAGS_DEPTH0, Opcode } from '../env'
 import type { EmitterContext } from './emitter'
 import type { ExpressionEmitterFn } from './assignment'
 
@@ -33,14 +33,18 @@ export class DestructuringEmitter {
     throw new Error(`未支持的解构模式: ${ts.SyntaxKind[pattern.kind]}`)
   }
 
-  emitBindingPatternFromValue(pattern: DestructuringTarget, context: EmitterContext) {
+  emitBindingPatternFromValue(
+    pattern: DestructuringTarget,
+    context: EmitterContext,
+    emitExpression: ExpressionEmitterFn,
+  ) {
     if (ts.isObjectBindingPattern(pattern)) {
-      this.emitObjectBindingFromValue(pattern, context)
+      this.emitObjectBindingFromValue(pattern, context, emitExpression)
       return
     }
 
     if (ts.isArrayBindingPattern(pattern)) {
-      this.emitArrayBindingFromValue(pattern, context)
+      this.emitArrayBindingFromValue(pattern, context, emitExpression)
       return
     }
 
@@ -72,6 +76,9 @@ export class DestructuringEmitter {
     context: EmitterContext,
     emitExpression: ExpressionEmitterFn,
   ) {
+    const { elements, rest } = this.splitObjectBinding(pattern)
+    const elementCount = elements.filter(Boolean).length
+    const useGetField2 = Boolean(rest || elementCount === 1)
     const assignLabel = context.labels.newLabel()
     const getLabel = context.labels.newLabel()
     const endLabel = context.labels.newLabel()
@@ -83,17 +90,49 @@ export class DestructuringEmitter {
     context.labels.emitLabel(assignLabel)
 
     context.bytecode.emitOp(Opcode.OP_to_object)
+    if (rest) {
+      context.bytecode.emitOp(Opcode.OP_object)
+      context.bytecode.emitOp(Opcode.OP_swap)
+    }
 
-    for (const element of pattern.elements) {
+    for (const element of elements) {
       if (!element) continue
       const { propAtom, targetAtom } = this.getObjectBindingAtoms(element, context)
-      context.bytecode.emitOp(Opcode.OP_get_field2)
-      context.bytecode.emitAtom(propAtom)
-      context.bytecode.emitIC(propAtom)
+      if (rest) {
+        context.bytecode.emitOp(Opcode.OP_swap)
+        context.bytecode.emitOp(Opcode.OP_null)
+        context.bytecode.emitOp(Opcode.OP_define_field)
+        context.bytecode.emitAtom(propAtom)
+        context.bytecode.emitOp(Opcode.OP_swap)
+      }
+      if (useGetField2) {
+        context.bytecode.emitOp(Opcode.OP_get_field2)
+        context.bytecode.emitAtom(propAtom)
+      } else {
+        context.bytecode.emitOp(Opcode.OP_dup)
+        context.bytecode.emitOp(Opcode.OP_get_field)
+        context.bytecode.emitAtom(propAtom)
+      }
+      if (element.initializer) {
+        this.emitDefaultInitializer(element.initializer, context, emitExpression)
+      }
       this.emitBindingInit(targetAtom, context)
     }
 
+    if (rest) {
+      if (!ts.isIdentifier(rest.name)) {
+        throw new Error('对象解构 rest 仅支持标识符绑定')
+      }
+      context.bytecode.emitOp(Opcode.OP_object)
+      context.bytecode.emitOp(Opcode.OP_copy_data_properties)
+      context.bytecode.emitU8(COPY_DATA_PROPERTIES_FLAGS_DEPTH0)
+      this.emitBindingInit(context.getAtom(rest.name.text), context)
+    }
+
     context.bytecode.emitOp(Opcode.OP_drop)
+    if (rest) {
+      context.bytecode.emitOp(Opcode.OP_drop)
+    }
     context.labels.emitGoto(Opcode.OP_goto, endLabel)
 
     context.labels.emitLabel(getLabel)
@@ -110,6 +149,7 @@ export class DestructuringEmitter {
     context: EmitterContext,
     emitExpression: ExpressionEmitterFn,
   ) {
+    const { elements, rest } = this.splitArrayBinding(pattern)
     const assignLabel = context.labels.newLabel()
     const getLabel = context.labels.newLabel()
     const endLabel = context.labels.newLabel()
@@ -122,8 +162,15 @@ export class DestructuringEmitter {
 
     context.bytecode.emitOp(Opcode.OP_for_of_start)
 
-    for (const element of pattern.elements) {
+    for (const element of elements) {
       if (!element) continue
+      if (element.kind === ts.SyntaxKind.OmittedExpression) {
+        context.bytecode.emitOp(Opcode.OP_for_of_next)
+        context.bytecode.emitU8(0)
+        context.bytecode.emitOp(Opcode.OP_drop)
+        context.bytecode.emitOp(Opcode.OP_drop)
+        continue
+      }
       if (!ts.isBindingElement(element) || !ts.isIdentifier(element.name)) {
         throw new Error('数组解构仅支持简单标识符元素')
       }
@@ -131,7 +178,18 @@ export class DestructuringEmitter {
       context.bytecode.emitOp(Opcode.OP_for_of_next)
       context.bytecode.emitU8(0)
       context.bytecode.emitOp(Opcode.OP_drop)
+      if (element.initializer) {
+        this.emitDefaultInitializer(element.initializer, context, emitExpression)
+      }
       this.emitBindingInit(atom, context)
+    }
+
+    if (rest) {
+      if (!ts.isIdentifier(rest.name)) {
+        throw new Error('数组解构 rest 仅支持标识符绑定')
+      }
+      this.emitSpreadArrayFromIterator(context, 0)
+      this.emitBindingInit(context.getAtom(rest.name.text), context)
     }
 
     context.bytecode.emitOp(Opcode.OP_iterator_close)
@@ -145,26 +203,77 @@ export class DestructuringEmitter {
     context.labels.emitLabel(endLabel)
   }
 
-  private emitObjectBindingFromValue(pattern: ts.ObjectBindingPattern, context: EmitterContext) {
+  private emitObjectBindingFromValue(
+    pattern: ts.ObjectBindingPattern,
+    context: EmitterContext,
+    emitExpression: ExpressionEmitterFn,
+  ) {
+    const { elements, rest } = this.splitObjectBinding(pattern)
+    const elementCount = elements.filter(Boolean).length
+    const useGetField2 = Boolean(rest || elementCount === 1)
     context.bytecode.emitOp(Opcode.OP_to_object)
+    if (rest) {
+      context.bytecode.emitOp(Opcode.OP_object)
+      context.bytecode.emitOp(Opcode.OP_swap)
+    }
 
-    for (const element of pattern.elements) {
+    for (const element of elements) {
       if (!element) continue
       const { propAtom, targetAtom } = this.getObjectBindingAtoms(element, context)
-      context.bytecode.emitOp(Opcode.OP_get_field2)
-      context.bytecode.emitAtom(propAtom)
-      context.bytecode.emitIC(propAtom)
+      if (rest) {
+        context.bytecode.emitOp(Opcode.OP_swap)
+        context.bytecode.emitOp(Opcode.OP_null)
+        context.bytecode.emitOp(Opcode.OP_define_field)
+        context.bytecode.emitAtom(propAtom)
+        context.bytecode.emitOp(Opcode.OP_swap)
+      }
+      if (useGetField2) {
+        context.bytecode.emitOp(Opcode.OP_get_field2)
+        context.bytecode.emitAtom(propAtom)
+      } else {
+        context.bytecode.emitOp(Opcode.OP_dup)
+        context.bytecode.emitOp(Opcode.OP_get_field)
+        context.bytecode.emitAtom(propAtom)
+      }
+      if (element.initializer) {
+        this.emitDefaultInitializer(element.initializer, context, emitExpression)
+      }
       this.emitBindingInit(targetAtom, context)
     }
 
+    if (rest) {
+      if (!ts.isIdentifier(rest.name)) {
+        throw new Error('对象解构 rest 仅支持标识符绑定')
+      }
+      context.bytecode.emitOp(Opcode.OP_object)
+      context.bytecode.emitOp(Opcode.OP_copy_data_properties)
+      context.bytecode.emitU8(COPY_DATA_PROPERTIES_FLAGS_DEPTH0)
+      this.emitBindingInit(context.getAtom(rest.name.text), context)
+    }
+
     context.bytecode.emitOp(Opcode.OP_drop)
+    if (rest) {
+      context.bytecode.emitOp(Opcode.OP_drop)
+    }
   }
 
-  private emitArrayBindingFromValue(pattern: ts.ArrayBindingPattern, context: EmitterContext) {
+  private emitArrayBindingFromValue(
+    pattern: ts.ArrayBindingPattern,
+    context: EmitterContext,
+    emitExpression: ExpressionEmitterFn,
+  ) {
+    const { elements, rest } = this.splitArrayBinding(pattern)
     context.bytecode.emitOp(Opcode.OP_for_of_start)
 
-    for (const element of pattern.elements) {
+    for (const element of elements) {
       if (!element) continue
+      if (element.kind === ts.SyntaxKind.OmittedExpression) {
+        context.bytecode.emitOp(Opcode.OP_for_of_next)
+        context.bytecode.emitU8(0)
+        context.bytecode.emitOp(Opcode.OP_drop)
+        context.bytecode.emitOp(Opcode.OP_drop)
+        continue
+      }
       if (!ts.isBindingElement(element) || !ts.isIdentifier(element.name)) {
         throw new Error('数组解构仅支持简单标识符元素')
       }
@@ -172,12 +281,97 @@ export class DestructuringEmitter {
       context.bytecode.emitOp(Opcode.OP_for_of_next)
       context.bytecode.emitU8(0)
       context.bytecode.emitOp(Opcode.OP_drop)
+      if (element.initializer) {
+        this.emitDefaultInitializer(element.initializer, context, emitExpression)
+      }
       this.emitBindingInit(atom, context)
+    }
+
+    if (rest) {
+      if (!ts.isIdentifier(rest.name)) {
+        throw new Error('数组解构 rest 仅支持标识符绑定')
+      }
+      this.emitSpreadArrayFromIterator(context, 0)
+      this.emitBindingInit(context.getAtom(rest.name.text), context)
     }
 
     context.bytecode.emitOp(Opcode.OP_iterator_close)
   }
 
+  private emitDefaultInitializer(
+    initializer: ts.Expression,
+    context: EmitterContext,
+    emitExpression: ExpressionEmitterFn,
+  ) {
+    context.bytecode.emitOp(Opcode.OP_dup)
+    context.bytecode.emitOp(Opcode.OP_is_undefined)
+    const skipLabel = context.labels.emitGoto(Opcode.OP_if_false, -1)
+    context.bytecode.emitOp(Opcode.OP_drop)
+    emitExpression(initializer, context)
+    context.labels.emitLabel(skipLabel)
+  }
+
+  private splitObjectBinding(pattern: ts.ObjectBindingPattern) {
+    const elements: ts.BindingElement[] = []
+    let rest: ts.BindingElement | undefined
+    pattern.elements.forEach((element, index) => {
+      if (!element) return
+      if (element.dotDotDotToken) {
+        if (rest) {
+          throw new Error('对象解构 rest 仅允许一个元素')
+        }
+        if (index !== pattern.elements.length - 1) {
+          throw new Error('对象解构 rest 必须是最后一个元素')
+        }
+        rest = element
+        return
+      }
+      elements.push(element)
+    })
+    return { elements, rest }
+  }
+
+  private splitArrayBinding(pattern: ts.ArrayBindingPattern) {
+    const elements: Array<ts.ArrayBindingElement> = []
+    let rest: ts.BindingElement | undefined
+    pattern.elements.forEach((element, index) => {
+      if (!element) return
+      if (ts.isBindingElement(element) && element.dotDotDotToken) {
+        if (rest) {
+          throw new Error('数组解构 rest 仅允许一个元素')
+        }
+        if (index !== pattern.elements.length - 1) {
+          throw new Error('数组解构 rest 必须是最后一个元素')
+        }
+        rest = element
+        return
+      }
+      elements.push(element)
+    })
+    return { elements, rest }
+  }
+
+  private emitSpreadArrayFromIterator(context: EmitterContext, depth: number) {
+    const nextLabel = context.labels.newLabel()
+    const doneLabel = context.labels.newLabel()
+
+    context.bytecode.emitOp(Opcode.OP_array_from)
+    context.bytecode.emitU16(0)
+    context.bytecode.emitOp(Opcode.OP_push_i32)
+    context.bytecode.emitU32(0)
+
+    context.labels.emitLabel(nextLabel)
+    context.bytecode.emitOp(Opcode.OP_for_of_next)
+    context.bytecode.emitU8(2 + depth)
+    context.labels.emitGoto(Opcode.OP_if_true, doneLabel)
+    context.bytecode.emitOp(Opcode.OP_define_array_el)
+    context.bytecode.emitOp(Opcode.OP_inc)
+    context.labels.emitGoto(Opcode.OP_goto, nextLabel)
+
+    context.labels.emitLabel(doneLabel)
+    context.bytecode.emitOp(Opcode.OP_drop)
+    context.bytecode.emitOp(Opcode.OP_drop)
+  }
   private emitObjectAssignment(
     pattern: ts.ObjectLiteralExpression,
     right: ts.Expression,
