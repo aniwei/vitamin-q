@@ -202,6 +202,28 @@ export class ExpressionEmitter {
     }
 
     if (ts.isPropertyAccessExpression(node)) {
+      if (ts.isPrivateIdentifier(node.name)) {
+        const binding = context.getPrivateBinding(node.name.text)
+        if (!binding) {
+          throw new Error(`未知的私有成员: ${node.name.text}`)
+        }
+        this.emitExpression(node.expression, context)
+        context.bytecode.emitOp(Opcode.OP_get_var_ref)
+        context.bytecode.emitU16(binding.index)
+        if (binding.kind === 'field') {
+          context.bytecode.emitOp(Opcode.OP_get_private_field)
+          return
+        }
+        if (binding.kind === 'accessor') {
+          context.bytecode.emitOp(Opcode.OP_check_brand)
+          context.bytecode.emitOp(Opcode.OP_call_method)
+          context.bytecode.emitU16(0)
+          return
+        }
+        context.bytecode.emitOp(Opcode.OP_check_brand)
+        context.bytecode.emitOp(Opcode.OP_nip)
+        return
+      }
       if (node.expression.kind === ts.SyntaxKind.SuperKeyword) {
         context.bytecode.emitOp(Opcode.OP_get_super)
         emitStringLiteral(context, node.name.text)
@@ -361,6 +383,22 @@ export class ExpressionEmitter {
       }
 
       if (ts.isPropertyAccessExpression(node.expression)) {
+        if (ts.isPrivateIdentifier(node.expression.name)) {
+          const binding = context.getPrivateBinding(node.expression.name.text)
+          if (!binding) {
+            throw new Error(`未知的私有成员: ${node.expression.name.text}`)
+          }
+          this.emitExpression(node.expression.expression, context)
+          context.bytecode.emitOp(Opcode.OP_get_var_ref)
+          context.bytecode.emitU16(binding.index)
+          context.bytecode.emitOp(Opcode.OP_check_brand)
+          for (const arg of node.arguments) {
+            this.emitExpression(arg, context)
+          }
+          context.bytecode.emitOp(Opcode.OP_call_method)
+          context.bytecode.emitU16(node.arguments.length)
+          return
+        }
         if (node.expression.expression.kind === ts.SyntaxKind.SuperKeyword) {
           context.bytecode.emitOp(Opcode.OP_get_super)
           emitStringLiteral(context, node.expression.name.text)

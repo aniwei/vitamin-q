@@ -234,7 +234,7 @@ export class ClassEmitter {
       }
     }
 
-    const needsBrand = privateBindings.some(binding => !binding.isStatic)
+    const needsBrand = privateBindings.some(binding => !binding.isStatic && binding.kind !== 'field')
     if (needsBrand) {
       context.bytecode.emitOp(Opcode.OP_dup)
       context.bytecode.emitOp(Opcode.OP_null)
@@ -306,6 +306,7 @@ export class ClassEmitter {
     }
 
     for (const binding of privateBindings) {
+      if (binding.kind !== 'field') continue
       context.bytecode.emitOp(Opcode.OP_close_loc)
       context.bytecode.emitU16(binding.local)
     }

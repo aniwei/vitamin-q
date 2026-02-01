@@ -99,6 +99,15 @@ const normalizeOpcodes = (ops: string[], options: { ignoreReturn?: boolean } = {
     if_false8: 'if_false',
     goto8: 'goto',
     put_var_init: 'put_var',
+    get_var_ref0: 'get_var_ref',
+    get_var_ref1: 'get_var_ref',
+    get_var_ref2: 'get_var_ref',
+    get_var_ref3: 'get_var_ref',
+    put_var_ref0: 'put_var_ref',
+    put_var_ref1: 'put_var_ref',
+    put_var_ref2: 'put_var_ref',
+    put_var_ref3: 'put_var_ref',
+    tail_call_method: 'call_method',
   }
 
   const normalized = ops
@@ -213,6 +222,16 @@ test('statements: class expression aligns with wasm', async () => {
 
 test('statements: class static block aligns with wasm', async () => {
   await assertStatementAligned('class Foo { static { this.x = 1; } }', { ignoreReturn: true })
+})
+
+test('statements: class private field access/assignment aligns with wasm', async () => {
+  await assertStatementAligned('class Foo { #x=1; getX(){ return this.#x; } setX(v){ this.#x = v; } }', {
+    ignoreReturn: true,
+  })
+})
+
+test('statements: class private method call aligns with wasm', async () => {
+  await assertStatementAligned('class Foo { #m(){ return 1; } call(){ this.#m(); } }', { ignoreReturn: true })
 })
 
 test('statements: with aligns with wasm', async () => {

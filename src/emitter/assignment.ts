@@ -82,6 +82,19 @@ export class AssignmentEmitter {
     }
 
     if (ts.isPropertyAccessExpression(left)) {
+      if (ts.isPrivateIdentifier(left.name)) {
+        const binding = context.getPrivateBinding(left.name.text)
+        if (!binding) {
+          throw new Error(`未知的私有成员: ${left.name.text}`)
+        }
+        emitExpression(left.expression, context)
+        emitExpression(right, context)
+        context.bytecode.emitOp(Opcode.OP_insert2)
+        context.bytecode.emitOp(Opcode.OP_get_var_ref)
+        context.bytecode.emitU16(binding.index)
+        context.bytecode.emitOp(Opcode.OP_put_private_field)
+        return
+      }
       emitExpression(left.expression, context)
       emitExpression(right, context)
       context.bytecode.emitOp(Opcode.OP_insert2)
