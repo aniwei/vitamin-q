@@ -66,6 +66,14 @@ export class AssignmentEmitter {
         context.bytecode.emitOp(Opcode.OP_put_ref_value)
         return
       }
+      const argIndex = context.getArgIndex(left.text)
+      if (argIndex >= 0) {
+        emitExpression(right, context)
+        context.bytecode.emitOp(Opcode.OP_dup)
+        context.bytecode.emitOp(Opcode.OP_put_arg)
+        context.bytecode.emitU16(argIndex)
+        return
+      }
       emitExpression(right, context)
       context.bytecode.emitOp(Opcode.OP_dup)
       context.bytecode.emitOp(Opcode.OP_put_var)

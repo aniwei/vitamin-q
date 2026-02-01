@@ -7,8 +7,10 @@ import type { ExpressionEmitterFn } from './assignment'
 /**
  * 字面量发射器（对象/数组）。
  *
- * @source QuickJS/src/core/parser.c:3760-3875
+ * @source QuickJS/src/core/parser.c:2928-3042
+ * @source QuickJS/src/core/parser.c:3760-3885
  * @see js_parse_array_literal
+ * @see js_parse_object_literal
  */
 export class LiteralEmitter {
   emitArrayLiteral(node: ts.ArrayLiteralExpression, context: EmitterContext, emitExpression: ExpressionEmitterFn) {

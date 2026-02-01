@@ -58,7 +58,7 @@ const emitPushConst = (context: EmitterContext, value: unknown) => {
 /**
  * 正则字面量发射。
  *
- * @source QuickJS/src/core/parser.c:467-557
+ * @source QuickJS/src/core/parser.c:467-571
  * @see js_parse_regexp
  */
 export const emitRegexpLiteral = (text: string, context: EmitterContext) => {

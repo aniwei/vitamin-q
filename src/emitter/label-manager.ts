@@ -11,7 +11,7 @@ export interface LabelManagerCallbacks {
 /**
  * 标签管理器（对应 new_label/emit_label/emit_goto）。
  *
- * @source QuickJS/src/core/parser.c:1835-1884
+ * @source QuickJS/src/core/parser.c:1828-1889
  * @see new_label
  */
 export class LabelManager {
@@ -25,7 +25,7 @@ export class LabelManager {
   /**
    * 新建标签。
    *
-   * @source QuickJS/src/core/parser.c:1835-1858
+    * @source QuickJS/src/core/parser.c:1849-1856
    * @see new_label
    */
   newLabel(): number {
@@ -43,7 +43,7 @@ export class LabelManager {
   /**
    * 发射标签。
    *
-   * @source QuickJS/src/core/parser.c:1866-1877
+    * @source QuickJS/src/core/parser.c:1866-1874
    * @see emit_label
    */
   emitLabel(label: number): number {
@@ -58,7 +58,7 @@ export class LabelManager {
   /**
    * 发射跳转。
    *
-   * @source QuickJS/src/core/parser.c:1878-1884
+    * @source QuickJS/src/core/parser.c:1878-1889
    * @see emit_goto
    */
   emitGoto(opcode: number, label: number): number {
@@ -76,7 +76,7 @@ export class LabelManager {
   /**
    * 获取当前标签槽数组。
    *
-   * @source QuickJS/src/core/parser.c:1835-1858
+    * @source QuickJS/src/core/parser.c:1828-1846
    * @see new_label
    */
   getSlots(): LabelSlot[] {

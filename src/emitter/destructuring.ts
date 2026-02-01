@@ -33,6 +33,20 @@ export class DestructuringEmitter {
     throw new Error(`未支持的解构模式: ${ts.SyntaxKind[pattern.kind]}`)
   }
 
+  emitBindingPatternFromValue(pattern: DestructuringTarget, context: EmitterContext) {
+    if (ts.isObjectBindingPattern(pattern)) {
+      this.emitObjectBindingFromValue(pattern, context)
+      return
+    }
+
+    if (ts.isArrayBindingPattern(pattern)) {
+      this.emitArrayBindingFromValue(pattern, context)
+      return
+    }
+
+    throw new Error(`未支持的解构模式: ${ts.SyntaxKind[pattern.kind]}`)
+  }
+
   emitAssignmentPattern(
     pattern: DestructuringAssignmentTarget,
     right: ts.Expression,
@@ -131,6 +145,41 @@ export class DestructuringEmitter {
     context.labels.emitGoto(Opcode.OP_goto, assignLabel)
 
     context.labels.emitLabel(endLabel)
+  }
+
+  private emitObjectBindingFromValue(pattern: ts.ObjectBindingPattern, context: EmitterContext) {
+    context.bytecode.emitOp(Opcode.OP_to_object)
+
+    for (const element of pattern.elements) {
+      if (!element) continue
+      const { propAtom, targetAtom } = this.getObjectBindingAtoms(element, context)
+      context.bytecode.emitOp(Opcode.OP_get_field2)
+      context.bytecode.emitAtom(propAtom)
+      context.bytecode.emitIC(propAtom)
+      context.bytecode.emitOp(Opcode.OP_put_var_init)
+      context.bytecode.emitAtom(targetAtom)
+    }
+
+    context.bytecode.emitOp(Opcode.OP_drop)
+  }
+
+  private emitArrayBindingFromValue(pattern: ts.ArrayBindingPattern, context: EmitterContext) {
+    context.bytecode.emitOp(Opcode.OP_for_of_start)
+
+    for (const element of pattern.elements) {
+      if (!element) continue
+      if (!ts.isBindingElement(element) || !ts.isIdentifier(element.name)) {
+        throw new Error('数组解构仅支持简单标识符元素')
+      }
+      const atom = context.getAtom(element.name.text)
+      context.bytecode.emitOp(Opcode.OP_for_of_next)
+      context.bytecode.emitU8(0)
+      context.bytecode.emitOp(Opcode.OP_drop)
+      context.bytecode.emitOp(Opcode.OP_put_var_init)
+      context.bytecode.emitAtom(atom)
+    }
+
+    context.bytecode.emitOp(Opcode.OP_iterator_close)
   }
 
   private emitObjectAssignment(

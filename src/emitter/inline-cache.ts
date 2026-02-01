@@ -13,7 +13,7 @@ export interface InlineCacheSnapshot {
 /**
  * Inline Cache 管理器（对应 add_ic_slot1）。
  *
- * @source QuickJS/src/core/ic.h:69-107
+ * @source QuickJS/src/core/ic.h:108-129
  * @see add_ic_slot1
  */
 export class InlineCacheManager {
@@ -23,7 +23,7 @@ export class InlineCacheManager {
   /**
    * 添加 IC 槽（去重）。
    *
-   * @source QuickJS/src/core/ic.h:69-107
+    * @source QuickJS/src/core/ic.h:108-129
    * @see add_ic_slot1
    */
   addSlot1(atom: JSAtom): number {
@@ -39,7 +39,7 @@ export class InlineCacheManager {
   /**
    * 获取槽位数量。
    *
-   * @source QuickJS/src/core/ic.h:69-107
+    * @source QuickJS/src/core/ic.h:108-129
    * @see add_ic_slot1
    */
   get count() {
@@ -49,7 +49,7 @@ export class InlineCacheManager {
   /**
    * 获取 IC 快照。
    *
-   * @source QuickJS/src/core/ic.h:69-107
+    * @source QuickJS/src/core/ic.h:108-129
    * @see add_ic_slot1
    */
   snapshot(): InlineCacheSnapshot {
@@ -59,7 +59,7 @@ export class InlineCacheManager {
   /**
    * 重置所有槽位。
    *
-   * @source QuickJS/src/core/ic.h:69-107
+    * @source QuickJS/src/core/ic.h:108-129
    * @see add_ic_slot1
    */
   reset() {

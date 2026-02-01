@@ -1,6 +1,6 @@
 import ts from 'typescript'
 
-import { JS_ATOM__with_, TempOpcode } from '../env'
+import { JS_ATOM__with_, Opcode, TempOpcode } from '../env'
 import type { JSAtom } from '../env'
 
 import { BytecodeBuffer } from './bytecode-buffer'
@@ -137,6 +137,10 @@ export interface EmitterContextOptions {
   atomTable?: AtomTable
   inlineCache?: InlineCacheManager
   constantPool?: ConstantPoolManager
+  argMap?: Map<string, number>
+  inFunction?: boolean
+  inAsync?: boolean
+  inGenerator?: boolean
 }
 
 /**
@@ -153,6 +157,10 @@ export class EmitterContext {
   readonly constantPool: ConstantPoolManager
   readonly scopes: ScopeManager
   readonly atomTable?: AtomTable
+  readonly argMap: Map<string, number>
+  readonly inFunction: boolean
+  readonly inAsync: boolean
+  readonly inGenerator: boolean
   private liveCode = true
   private lineColCache
 
@@ -162,6 +170,10 @@ export class EmitterContext {
     this.constantPool = options.constantPool ?? new ConstantPoolManager()
     this.scopes = new ScopeManager()
     this.atomTable = options.atomTable
+    this.argMap = options.argMap ?? new Map()
+    this.inFunction = options.inFunction ?? false
+    this.inAsync = options.inAsync ?? false
+    this.inGenerator = options.inGenerator ?? false
     this.bytecode = new BytecodeEmitter({
       bytecode: options.bytecode,
       atomTable: options.atomTable,
@@ -240,6 +252,11 @@ export class EmitterContext {
     return this.atomTable.getOrAdd(name)
   }
 
+  getArgIndex(name: string): number {
+    const index = this.argMap.get(name)
+    return index === undefined ? -1 : index
+  }
+
   /**
    * 查找最近的 with 作用域变量索引。
    */
@@ -280,6 +297,7 @@ export interface BytecodeCompilerOptions {
   inlineCache?: InlineCacheManager
   constantPool?: ConstantPoolManager
   bytecode?: BytecodeBuffer
+  expressionStatementDrop?: boolean
 }
 
 /**
@@ -320,10 +338,18 @@ export class BytecodeCompiler {
       bytecode: this.options.bytecode,
     })
 
-    for (const stmt of sourceFile.statements) {
+    this.compileStatements(sourceFile.statements, context)
+    return context.bytecode.bytecode
+  }
+
+  compileStatements(statements: readonly ts.Statement[], context: EmitterContext) {
+    for (const stmt of statements) {
       this.dispatcher.dispatch(stmt, context)
     }
-    return context.bytecode.bytecode
+  }
+
+  emitExpression(node: ts.Expression, context: EmitterContext) {
+    this.expressionEmitter.emitExpression(node, context)
   }
 
   /**
@@ -350,6 +376,9 @@ export class BytecodeCompiler {
       const stmt = node as ts.ExpressionStatement
       context.emitSourcePos(stmt)
       this.dispatcher.dispatch(stmt.expression, context)
+      if (this.options.expressionStatementDrop) {
+        context.bytecode.emitOp(Opcode.OP_drop)
+      }
     })
 
     this.dispatcher.registerStatement(ts.SyntaxKind.IfStatement, (node, context) => {
@@ -404,6 +433,14 @@ export class BytecodeCompiler {
 
     this.dispatcher.registerStatement(ts.SyntaxKind.DebuggerStatement, (node, context) => {
       this.statementEmitter.emitDebuggerStatement(node as ts.DebuggerStatement, context)
+    })
+
+    this.dispatcher.registerStatement(ts.SyntaxKind.FunctionDeclaration, (node, context) => {
+      this.statementEmitter.emitFunctionDeclaration(node as ts.FunctionDeclaration, context)
+    })
+
+    this.dispatcher.registerDeclaration(ts.SyntaxKind.FunctionDeclaration, (node, context) => {
+      this.statementEmitter.emitFunctionDeclaration(node as ts.FunctionDeclaration, context)
     })
 
     this.dispatcher.registerStatement(ts.SyntaxKind.WithStatement, (node, context) => {
@@ -502,6 +539,9 @@ export class BytecodeCompiler {
       ts.SyntaxKind.ArrayLiteralExpression,
       ts.SyntaxKind.ObjectLiteralExpression,
       ts.SyntaxKind.RegularExpressionLiteral,
+      ts.SyntaxKind.FunctionExpression,
+      ts.SyntaxKind.ArrowFunction,
+      ts.SyntaxKind.YieldExpression,
     ]
 
     for (const kind of expressionKinds) {

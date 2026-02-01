@@ -4,6 +4,7 @@ import { FOR_OF_NEXT_OPERAND_DEFAULT, JS_ATOM__with_, JSVarKindEnum, Opcode } fr
 import type { EmitterContext } from './emitter'
 import type { ExpressionEmitterFn } from './assignment'
 import { DestructuringEmitter } from './destructuring'
+import { FunctionEmitter } from './functions'
 
 export type StatementEmitterFn = (node: ts.Statement, context: EmitterContext) => void
 
@@ -16,6 +17,7 @@ export type StatementEmitterFn = (node: ts.Statement, context: EmitterContext) =
 export class StatementEmitter {
   private loopStack: Array<{ breakLabel: number; continueLabel?: number }> = []
   private destructuringEmitter = new DestructuringEmitter()
+  private functionEmitter = new FunctionEmitter()
 
   private pushLoop(breakLabel: number, continueLabel?: number) {
     this.loopStack.push({ breakLabel, continueLabel })
@@ -81,10 +83,19 @@ export class StatementEmitter {
       const atom = context.getAtom(decl.name.text)
       if (decl.initializer) {
         emitExpression(decl.initializer, context)
+        if (ts.isFunctionExpression(decl.initializer) || ts.isArrowFunction(decl.initializer)) {
+          context.bytecode.emitOp(Opcode.OP_set_name)
+          context.bytecode.emitAtom(atom)
+        }
         context.bytecode.emitOp(Opcode.OP_put_var)
         context.bytecode.emitAtom(atom)
       }
     }
+  }
+
+  emitFunctionDeclaration(node: ts.FunctionDeclaration, context: EmitterContext) {
+    context.emitSourcePos(node)
+    this.functionEmitter.emitFunctionDeclaration(node, context)
   }
 
   emitReturnStatement(
@@ -95,9 +106,14 @@ export class StatementEmitter {
     context.emitSourcePos(node)
     if (node.expression) {
       emitExpression(node.expression, context)
-      context.bytecode.emitOp(Opcode.OP_return)
+      context.bytecode.emitOp(context.inAsync ? Opcode.OP_return_async : Opcode.OP_return)
     } else {
-      context.bytecode.emitOp(Opcode.OP_return_undef)
+      if (context.inAsync) {
+        context.bytecode.emitOp(Opcode.OP_undefined)
+        context.bytecode.emitOp(Opcode.OP_return_async)
+      } else {
+        context.bytecode.emitOp(Opcode.OP_return_undef)
+      }
     }
   }
 

@@ -157,6 +157,26 @@ test('statements: debugger aligns with wasm', async () => {
   await assertStatementAligned('debugger;', { ignoreReturn: true })
 })
 
+test('statements: function declaration aligns with wasm', async () => {
+  await assertStatementAligned('function foo(a, b) { return a + b; }', { ignoreReturn: true })
+})
+
+test('statements: function expression aligns with wasm', async () => {
+  await assertStatementAligned('const foo = function(a) { return a; };', { ignoreReturn: true })
+})
+
+test('statements: arrow function aligns with wasm', async () => {
+  await assertStatementAligned('const foo = (a) => a;', { ignoreReturn: true })
+})
+
+test('statements: async function aligns with wasm', async () => {
+  await assertStatementAligned('async function foo() { return 1; }', { ignoreReturn: true })
+})
+
+test('statements: generator function aligns with wasm', async () => {
+  await assertStatementAligned('function* foo() { yield 1; }', { ignoreReturn: true })
+})
+
 test('statements: with aligns with wasm', async () => {
   await assertStatementAligned('with (obj) { x = 1; }', { ignoreReturn: true })
 })

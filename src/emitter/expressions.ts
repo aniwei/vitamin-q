@@ -6,6 +6,7 @@ import type { JSAtom } from '../env'
 import { AssignmentEmitter } from './assignment'
 import { LiteralEmitter } from './literals'
 import { emitRegexpLiteral } from './regexp'
+import { FunctionEmitter } from './functions'
 import type { EmitterContext } from './emitter'
 
 const isInt32 = (value: number): boolean => Number.isInteger(value) && value >= -2147483648 && value <= 2147483647
@@ -40,6 +41,7 @@ const emitStringLiteral = (context: EmitterContext, value: string) => {
 export class ExpressionEmitter {
   private assignmentEmitter = new AssignmentEmitter()
   private literalEmitter = new LiteralEmitter()
+  private functionEmitter = new FunctionEmitter()
 
   /**
    * 发射表达式。
@@ -89,6 +91,11 @@ export class ExpressionEmitter {
       return
     }
 
+    if (ts.isFunctionExpression(node) || ts.isArrowFunction(node)) {
+      this.functionEmitter.emitFunctionExpression(node, context)
+      return
+    }
+
     if (node.kind === ts.SyntaxKind.TrueKeyword) {
       context.bytecode.emitOp(Opcode.OP_push_true)
       return
@@ -114,6 +121,23 @@ export class ExpressionEmitter {
       return
     }
 
+    if (ts.isYieldExpression(node)) {
+      if (!context.inGenerator) {
+        throw new Error('yield 只能出现在生成器函数中')
+      }
+      if (node.expression) {
+        this.emitExpression(node.expression, context)
+      } else {
+        context.bytecode.emitOp(Opcode.OP_undefined)
+      }
+      if (node.asteriskToken) {
+        context.bytecode.emitOp(Opcode.OP_yield_star)
+      } else {
+        context.bytecode.emitOp(Opcode.OP_yield)
+      }
+      return
+    }
+
     if (ts.isIdentifier(node)) {
       const atom = context.getAtom(node.text)
       const scopeLevel = context.scopes.scopeLevel
@@ -124,6 +148,17 @@ export class ExpressionEmitter {
           context.bytecode.emitU16(localIdx)
           return
         }
+      }
+      const argIndex = context.getArgIndex(node.text)
+      if (argIndex >= 0) {
+        context.bytecode.emitOp(Opcode.OP_get_arg)
+        context.bytecode.emitU16(argIndex)
+        return
+      }
+      if (context.inFunction && node.text === 'arguments') {
+        context.bytecode.emitOp(Opcode.OP_special_object)
+        context.bytecode.emitU8(OPSpecialObjectEnum.OP_SPECIAL_OBJECT_ARGUMENTS)
+        return
       }
       const withIdx = context.findWithVarIndex()
       if (withIdx >= 0) {
