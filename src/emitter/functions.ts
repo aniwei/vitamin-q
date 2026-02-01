@@ -7,7 +7,7 @@ import { ConstantPoolManager } from './constant-pool'
 import { InlineCacheManager } from './inline-cache'
 import { DestructuringEmitter } from './destructuring'
 
-interface FunctionTemplate {
+export interface FunctionTemplate {
   kind: 'function'
   name?: string
   params: string[]
@@ -49,16 +49,7 @@ export class FunctionEmitter {
   private destructuringEmitter = new DestructuringEmitter()
 
   emitFunctionExpression(node: ts.FunctionExpression | ts.ArrowFunction, context: EmitterContext) {
-    const template = this.createFunctionTemplate(node, context)
-    const idx = context.constantPool.add(template)
-    context.bytecode.emitOp(Opcode.OP_fclosure)
-    context.bytecode.emitU32(idx)
-
-    if (template.name) {
-      const atom = context.getAtom(template.name)
-      context.bytecode.emitOp(Opcode.OP_set_name)
-      context.bytecode.emitAtom(atom)
-    }
+    this.emitFunctionClosure(node, context, { setName: true })
   }
 
   emitFunctionDeclaration(node: ts.FunctionDeclaration, context: EmitterContext) {
@@ -72,10 +63,7 @@ export class FunctionEmitter {
     context.bytecode.emitAtom(atom)
     context.bytecode.emitU8(DEFINE_GLOBAL_FUNC_VAR)
 
-    const template = this.createFunctionTemplate(node, context)
-    const idx = context.constantPool.add(template)
-    context.bytecode.emitOp(Opcode.OP_fclosure)
-    context.bytecode.emitU32(idx)
+    this.emitFunctionClosure(node, context)
 
     context.bytecode.emitOp(Opcode.OP_define_func)
     context.bytecode.emitAtom(atom)
@@ -85,15 +73,43 @@ export class FunctionEmitter {
   private createFunctionTemplate(
     node: ts.FunctionLikeDeclarationBase,
     context: EmitterContext,
+    options: { privateBindings?: Map<string, { index: number; kind: 'field' | 'method' | 'accessor' }> } = {},
   ): FunctionTemplate {
     const template = createTemplate(node, context.sourceFile)
-    template.bytecode = this.compileFunctionBody(node, context)
+    template.bytecode = this.compileFunctionBody(node, context, options)
     return template
+  }
+
+  buildFunctionTemplate(node: ts.FunctionLikeDeclarationBase, context: EmitterContext): FunctionTemplate {
+    return this.createFunctionTemplate(node, context)
+  }
+
+  emitFunctionClosure(
+    node: ts.FunctionLikeDeclarationBase,
+    context: EmitterContext,
+    options: {
+      setName?: boolean
+      privateBindings?: Map<string, { index: number; kind: 'field' | 'method' | 'accessor' }>
+    } = {},
+  ) {
+    const template = this.createFunctionTemplate(node, context, {
+      privateBindings: options.privateBindings,
+    })
+    const idx = context.constantPool.add(template)
+    context.bytecode.emitOp(Opcode.OP_fclosure)
+    context.bytecode.emitU32(idx)
+
+    if (options.setName && template.name) {
+      const atom = context.getAtom(template.name)
+      context.bytecode.emitOp(Opcode.OP_set_name)
+      context.bytecode.emitAtom(atom)
+    }
   }
 
   private compileFunctionBody(
     node: ts.FunctionLikeDeclarationBase,
     parentContext: EmitterContext,
+    options: { privateBindings?: Map<string, { index: number; kind: 'field' | 'method' | 'accessor' }> } = {},
   ): Uint8Array {
     const bytecode = new BytecodeBuffer()
     const inlineCache = new InlineCacheManager()
@@ -122,6 +138,7 @@ export class FunctionEmitter {
       inFunction: true,
       inAsync: Boolean(node.modifiers?.some(mod => mod.kind === ts.SyntaxKind.AsyncKeyword)),
       inGenerator: Boolean((node as ts.FunctionDeclaration | ts.FunctionExpression).asteriskToken),
+      privateBindings: options.privateBindings,
     })
 
     if (!node.body) {

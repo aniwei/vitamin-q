@@ -7,6 +7,7 @@ import { AssignmentEmitter } from './assignment'
 import { LiteralEmitter } from './literals'
 import { emitRegexpLiteral } from './regexp'
 import { FunctionEmitter } from './functions'
+import { ClassEmitter } from './classes'
 import type { EmitterContext } from './emitter'
 
 const isInt32 = (value: number): boolean => Number.isInteger(value) && value >= -2147483648 && value <= 2147483647
@@ -42,6 +43,7 @@ export class ExpressionEmitter {
   private assignmentEmitter = new AssignmentEmitter()
   private literalEmitter = new LiteralEmitter()
   private functionEmitter = new FunctionEmitter()
+  private classEmitter = new ClassEmitter()
 
   /**
    * 发射表达式。
@@ -96,6 +98,11 @@ export class ExpressionEmitter {
       return
     }
 
+    if (ts.isClassExpression(node)) {
+      this.classEmitter.emitClassExpression(node, context, this.emitExpression.bind(this))
+      return
+    }
+
     if (node.kind === ts.SyntaxKind.TrueKeyword) {
       context.bytecode.emitOp(Opcode.OP_push_true)
       return
@@ -131,7 +138,11 @@ export class ExpressionEmitter {
         context.bytecode.emitOp(Opcode.OP_undefined)
       }
       if (node.asteriskToken) {
-        context.bytecode.emitOp(Opcode.OP_yield_star)
+        if (context.inAsync && context.inGenerator) {
+          context.bytecode.emitOp(Opcode.OP_async_yield_star)
+        } else {
+          context.bytecode.emitOp(Opcode.OP_yield_star)
+        }
       } else {
         context.bytecode.emitOp(Opcode.OP_yield)
       }

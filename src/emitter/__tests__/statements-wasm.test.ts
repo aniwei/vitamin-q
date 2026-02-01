@@ -66,6 +66,7 @@ const normalizeOpcodes = (ops: string[], options: { ignoreReturn?: boolean } = {
     'put_loc1',
     'put_loc2',
     'put_loc3',
+    'put_loc8',
     'set_loc0',
     'set_loc1',
     'set_loc2',
@@ -175,6 +176,43 @@ test('statements: async function aligns with wasm', async () => {
 
 test('statements: generator function aligns with wasm', async () => {
   await assertStatementAligned('function* foo() { yield 1; }', { ignoreReturn: true })
+})
+
+test('statements: async generator function aligns with wasm', async () => {
+  await assertStatementAligned('async function* foo() { yield 1; }', { ignoreReturn: true })
+})
+
+test('statements: class declaration aligns with wasm', async () => {
+  await assertStatementAligned('class Foo { constructor(a) { this.a = a; } method() { return this.a; } }', {
+    ignoreReturn: true,
+  })
+})
+
+test('statements: class methods/accessors align with wasm', async () => {
+  await assertStatementAligned(
+    'class Foo { method(){} static sm(){} get x(){ return 1; } set x(v){} }',
+    { ignoreReturn: true },
+  )
+})
+
+test('statements: class fields align with wasm', async () => {
+  await assertStatementAligned('class Foo { x = 1; static y = 2; }', { ignoreReturn: true })
+})
+
+test('statements: class extends aligns with wasm', async () => {
+  await assertStatementAligned('class Base {} class Foo extends Base {}', { ignoreReturn: true })
+})
+
+test('statements: class computed fields align with wasm', async () => {
+  await assertStatementAligned('const k = "x"; class Foo { [k] = 1; static [k] = 2; }', { ignoreReturn: true })
+})
+
+test('statements: class expression aligns with wasm', async () => {
+  await assertStatementAligned('const A = class { constructor(){} method(){} };', { ignoreReturn: true })
+})
+
+test('statements: class static block aligns with wasm', async () => {
+  await assertStatementAligned('class Foo { static { this.x = 1; } }', { ignoreReturn: true })
 })
 
 test('statements: with aligns with wasm', async () => {

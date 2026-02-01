@@ -114,3 +114,15 @@ test('functions: async return emits return_async', () => {
   const ops = normalizeOpcodes(extractTemplateOpcodes(source, 'foo'))
   assert.deepEqual(ops, ['push_i32', 'return_async'])
 })
+
+test('functions: generator yield* emits yield_star', () => {
+  const source = 'function* foo() { yield* bar; }'
+  const ops = normalizeOpcodes(extractTemplateOpcodes(source, 'foo'))
+  assert.deepEqual(ops, ['initial_yield', 'get_var', 'yield_star', 'drop', 'return_undef'])
+})
+
+test('functions: async generator yield* emits async_yield_star', () => {
+  const source = 'async function* foo() { yield* bar; }'
+  const ops = normalizeOpcodes(extractTemplateOpcodes(source, 'foo'))
+  assert.deepEqual(ops, ['initial_yield', 'get_var', 'async_yield_star', 'drop', 'undefined', 'return_async'])
+})

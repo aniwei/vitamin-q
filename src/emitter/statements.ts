@@ -5,6 +5,7 @@ import type { EmitterContext } from './emitter'
 import type { ExpressionEmitterFn } from './assignment'
 import { DestructuringEmitter } from './destructuring'
 import { FunctionEmitter } from './functions'
+import { ClassEmitter } from './classes'
 
 export type StatementEmitterFn = (node: ts.Statement, context: EmitterContext) => void
 
@@ -18,6 +19,7 @@ export class StatementEmitter {
   private loopStack: Array<{ breakLabel: number; continueLabel?: number }> = []
   private destructuringEmitter = new DestructuringEmitter()
   private functionEmitter = new FunctionEmitter()
+  private classEmitter = new ClassEmitter()
 
   private pushLoop(breakLabel: number, continueLabel?: number) {
     this.loopStack.push({ breakLabel, continueLabel })
@@ -96,6 +98,14 @@ export class StatementEmitter {
   emitFunctionDeclaration(node: ts.FunctionDeclaration, context: EmitterContext) {
     context.emitSourcePos(node)
     this.functionEmitter.emitFunctionDeclaration(node, context)
+  }
+
+  emitClassDeclaration(
+    node: ts.ClassDeclaration,
+    context: EmitterContext,
+    emitExpression: ExpressionEmitterFn,
+  ) {
+    this.classEmitter.emitClassDeclaration(node, context, emitExpression)
   }
 
   emitReturnStatement(

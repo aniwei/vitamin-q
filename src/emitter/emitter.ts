@@ -141,6 +141,7 @@ export interface EmitterContextOptions {
   inFunction?: boolean
   inAsync?: boolean
   inGenerator?: boolean
+  privateBindings?: Map<string, { index: number; kind: 'field' | 'method' | 'accessor' }>
 }
 
 /**
@@ -161,8 +162,10 @@ export class EmitterContext {
   readonly inFunction: boolean
   readonly inAsync: boolean
   readonly inGenerator: boolean
+  readonly privateBindings?: Map<string, { index: number; kind: 'field' | 'method' | 'accessor' }>
   private liveCode = true
   private lineColCache
+  private nextTempLocal = 1
 
   constructor(options: EmitterContextOptions) {
     this.sourceFile = options.sourceFile
@@ -174,6 +177,7 @@ export class EmitterContext {
     this.inFunction = options.inFunction ?? false
     this.inAsync = options.inAsync ?? false
     this.inGenerator = options.inGenerator ?? false
+    this.privateBindings = options.privateBindings
     this.bytecode = new BytecodeEmitter({
       bytecode: options.bytecode,
       atomTable: options.atomTable,
@@ -257,6 +261,10 @@ export class EmitterContext {
     return index === undefined ? -1 : index
   }
 
+  getPrivateBinding(name: string): { index: number; kind: 'field' | 'method' | 'accessor' } | undefined {
+    return this.privateBindings?.get(name)
+  }
+
   /**
    * 查找最近的 with 作用域变量索引。
    */
@@ -289,6 +297,15 @@ export class EmitterContext {
    */
   getLineColCache() {
     return this.lineColCache
+  }
+
+  /**
+   * 分配临时本地变量索引（保留 0 用于 <ret>）。
+   */
+  allocateTempLocal(): number {
+    const idx = this.nextTempLocal
+    this.nextTempLocal += 1
+    return idx
   }
 }
 
@@ -443,6 +460,22 @@ export class BytecodeCompiler {
       this.statementEmitter.emitFunctionDeclaration(node as ts.FunctionDeclaration, context)
     })
 
+    this.dispatcher.registerStatement(ts.SyntaxKind.ClassDeclaration, (node, context) => {
+      this.statementEmitter.emitClassDeclaration(
+        node as ts.ClassDeclaration,
+        context,
+        (expr, ctx) => this.expressionEmitter.emitExpression(expr, ctx),
+      )
+    })
+
+    this.dispatcher.registerDeclaration(ts.SyntaxKind.ClassDeclaration, (node, context) => {
+      this.statementEmitter.emitClassDeclaration(
+        node as ts.ClassDeclaration,
+        context,
+        (expr, ctx) => this.expressionEmitter.emitExpression(expr, ctx),
+      )
+    })
+
     this.dispatcher.registerStatement(ts.SyntaxKind.WithStatement, (node, context) => {
       this.statementEmitter.emitWithStatement(
         node as ts.WithStatement,
@@ -542,6 +575,7 @@ export class BytecodeCompiler {
       ts.SyntaxKind.FunctionExpression,
       ts.SyntaxKind.ArrowFunction,
       ts.SyntaxKind.YieldExpression,
+      ts.SyntaxKind.ClassExpression,
     ]
 
     for (const kind of expressionKinds) {
