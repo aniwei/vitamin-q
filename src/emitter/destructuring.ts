@@ -20,17 +20,15 @@ export class DestructuringEmitter {
     context: EmitterContext,
     emitExpression: ExpressionEmitterFn,
   ) {
-    if (ts.isObjectBindingPattern(pattern)) {
-      this.emitObjectBinding(pattern, initializer, context, emitExpression)
-      return
+    const patternKind = (pattern as ts.Node).kind
+    switch (pattern.kind) {
+      case ts.SyntaxKind.ObjectBindingPattern:
+        return this.emitObjectBinding(pattern as ts.ObjectBindingPattern, initializer, context, emitExpression)
+      case ts.SyntaxKind.ArrayBindingPattern:
+        return this.emitArrayBinding(pattern as ts.ArrayBindingPattern, initializer, context, emitExpression)
+      default:
+        throw new Error(`未支持的解构模式: ${ts.SyntaxKind[patternKind]}`)
     }
-
-    if (ts.isArrayBindingPattern(pattern)) {
-      this.emitArrayBinding(pattern, initializer, context, emitExpression)
-      return
-    }
-
-    throw new Error(`未支持的解构模式: ${ts.SyntaxKind[pattern.kind]}`)
   }
 
   emitBindingPatternFromValue(
@@ -38,17 +36,15 @@ export class DestructuringEmitter {
     context: EmitterContext,
     emitExpression: ExpressionEmitterFn,
   ) {
-    if (ts.isObjectBindingPattern(pattern)) {
-      this.emitObjectBindingFromValue(pattern, context, emitExpression)
-      return
+    const patternKind = (pattern as ts.Node).kind
+    switch (pattern.kind) {
+      case ts.SyntaxKind.ObjectBindingPattern:
+        return this.emitObjectBindingFromValue(pattern as ts.ObjectBindingPattern, context, emitExpression)
+      case ts.SyntaxKind.ArrayBindingPattern:
+        return this.emitArrayBindingFromValue(pattern as ts.ArrayBindingPattern, context, emitExpression)
+      default:
+        throw new Error(`未支持的解构模式: ${ts.SyntaxKind[patternKind]}`)
     }
-
-    if (ts.isArrayBindingPattern(pattern)) {
-      this.emitArrayBindingFromValue(pattern, context, emitExpression)
-      return
-    }
-
-    throw new Error(`未支持的解构模式: ${ts.SyntaxKind[pattern.kind]}`)
   }
 
   emitAssignmentPattern(
@@ -57,17 +53,15 @@ export class DestructuringEmitter {
     context: EmitterContext,
     emitExpression: ExpressionEmitterFn,
   ) {
-    if (ts.isObjectLiteralExpression(pattern)) {
-      this.emitObjectAssignment(pattern, right, context, emitExpression)
-      return
+    const patternKind = (pattern as ts.Node).kind
+    switch (pattern.kind) {
+      case ts.SyntaxKind.ObjectLiteralExpression:
+        return this.emitObjectAssignment(pattern as ts.ObjectLiteralExpression, right, context, emitExpression)
+      case ts.SyntaxKind.ArrayLiteralExpression:
+        return this.emitArrayAssignment(pattern as ts.ArrayLiteralExpression, right, context, emitExpression)
+      default:
+        throw new Error(`未支持的解构赋值模式: ${ts.SyntaxKind[patternKind]}`)
     }
-
-    if (ts.isArrayLiteralExpression(pattern)) {
-      this.emitArrayAssignment(pattern, right, context, emitExpression)
-      return
-    }
-
-    throw new Error(`未支持的解构赋值模式: ${ts.SyntaxKind[pattern.kind]}`)
   }
 
   private emitObjectBinding(

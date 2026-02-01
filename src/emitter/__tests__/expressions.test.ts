@@ -185,6 +185,7 @@ test('emitter: new expression emits OP_call_constructor', () => {
     (ctor >>> 8) & 0xff,
     (ctor >>> 16) & 0xff,
     (ctor >>> 24) & 0xff,
+    Opcode.OP_dup,
     Opcode.OP_push_i32, 1, 0, 0, 0,
     Opcode.OP_call_constructor,
     1, 0,
@@ -950,11 +951,9 @@ test('emitter: array literal with spread', () => {
   const arr = atoms.getOrAdd('arr')
   const bytes = compileExpression('[1, ...arr, 2];', atoms)
   assert.deepEqual(Array.from(bytes), withLineInfo([
-    Opcode.OP_array_from, 0, 0,
-    Opcode.OP_push_i32, 0, 0, 0, 0,
     Opcode.OP_push_i32, 1, 0, 0, 0,
-    Opcode.OP_define_array_el,
-    Opcode.OP_inc,
+    Opcode.OP_array_from, 1, 0,
+    Opcode.OP_push_i32, 1, 0, 0, 0,
     Opcode.OP_get_var,
     arr & 0xff,
     (arr >>> 8) & 0xff,

@@ -17,22 +17,30 @@ export class AssignmentEmitter {
 
   emitAssignment(node: ts.BinaryExpression, context: EmitterContext, emitExpression: ExpressionEmitterFn) {
     const opKind = node.operatorToken.kind
-    if (opKind === ts.SyntaxKind.EqualsToken) {
-      this.emitSimpleAssignment(node.left, node.right, context, emitExpression)
-      return
+    switch (opKind) {
+      case ts.SyntaxKind.EqualsToken:
+        return this.emitSimpleAssignment(node.left, node.right, context, emitExpression)
+      case ts.SyntaxKind.AmpersandAmpersandEqualsToken:
+        return this.emitLogicalAssignment(node.left, node.right, '&&', context, emitExpression)
+      case ts.SyntaxKind.BarBarEqualsToken:
+        return this.emitLogicalAssignment(node.left, node.right, '||', context, emitExpression)
+      case ts.SyntaxKind.QuestionQuestionEqualsToken:
+        return this.emitLogicalAssignment(node.left, node.right, '??', context, emitExpression)
+      default:
+        return this.emitCompoundAssignmentByOperator(opKind, node, context, emitExpression)
     }
+  }
 
-    const logicalKind = this.getLogicalAssignmentKind(opKind)
-    if (logicalKind) {
-      this.emitLogicalAssignment(node.left, node.right, logicalKind, context, emitExpression)
-      return
-    }
-
+  private emitCompoundAssignmentByOperator(
+    opKind: ts.SyntaxKind,
+    node: ts.BinaryExpression,
+    context: EmitterContext,
+    emitExpression: ExpressionEmitterFn,
+  ) {
     const compoundOpcode = this.getCompoundOpcode(opKind)
     if (!compoundOpcode) {
       throw new Error(`未支持的赋值运算符: ${ts.SyntaxKind[opKind]}`)
     }
-
     this.emitCompoundAssignment(node.left, node.right, compoundOpcode, context, emitExpression)
   }
 

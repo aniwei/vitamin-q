@@ -19,13 +19,13 @@ const withLineInfo = (bytes: number[]) => [
   ...bytes,
 ]
 
-test('statement: variable declaration emits OP_put_var', () => {
+test('statement: variable declaration emits OP_put_var_init', () => {
   const atoms = new AtomTable()
   const name = atoms.getOrAdd('a')
   const bytes = compileStatements('let a = 1;', atoms)
   assert.deepEqual(Array.from(bytes), withLineInfo([
     Opcode.OP_push_i32, 1, 0, 0, 0,
-    Opcode.OP_put_var,
+    Opcode.OP_put_var_init,
     name & 0xff,
     (name >>> 8) & 0xff,
     (name >>> 16) & 0xff,

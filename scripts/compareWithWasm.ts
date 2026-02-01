@@ -143,15 +143,25 @@ const normalizeOpcodes = (ops: string[]): string[] => {
 		.map(op => shortMap[op] ?? op)
 }
 
-const compileEmitterOpcodes = (source: string, sourcePath: string): string[] => {
+const compileEmitterOpcodes = (
+	source: string, 
+	sourcePath: string): string[] => {
 	const atomTable = new AtomTable()
-	const node = parseSource(source, { fileName: sourcePath })
-	const compiler = new BytecodeCompiler({ atomTable })
+	const node = parseSource(source, { 
+		fileName: sourcePath 
+	})
+
+	const compiler = new BytecodeCompiler({ 	
+		atomTable 
+	})
+
 	const buffer = compiler.compile(node)
 	return decodeOpcodes(buffer.toUint8Array())
 }
 
-const compareOps = (ours: string[], wasm: string[]): string | undefined => {
+const compareOps = (
+	ours: string[], 
+	wasm: string[]): string | undefined => {
 	const length = Math.max(ours.length, wasm.length)
 	for (let i = 0; i < length; i += 1) {
 		if (ours[i] !== wasm[i]) {
