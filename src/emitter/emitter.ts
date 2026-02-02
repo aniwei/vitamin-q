@@ -1,7 +1,6 @@
 import ts from 'typescript'
 
-import { JS_ATOM__with_, Opcode, TempOpcode } from '../env'
-import type { JSAtom } from '../env'
+import { JSAtom, Opcode, TempOpcode } from '../env'
 
 import { BytecodeBuffer } from './bytecode-buffer'
 import type { AtomTable } from './atom-table'
@@ -293,7 +292,7 @@ export class EmitterContext {
       let cursor = this.scopes.scopes[scopeLevel].first
       while (cursor >= 0) {
         const vd = this.scopes.vars[cursor]
-        if (vd.varName === JS_ATOM__with_) {
+        if (vd.varName === JSAtom.JS_ATOM__with_) {
           return cursor
         }
         if (vd.scopeLevel !== scopeLevel) break
@@ -456,7 +455,7 @@ export class BytecodeCompiler {
 
     this.dispatcher.registerDeclaration(ts.SyntaxKind.VariableStatement, (node, context) => {
       this.statementEmitter.emitVariableStatement(
-        node as ts.VariableStatement,
+        node as unknown as ts.VariableStatement,
         context,
         (expr, ctx) => this.expressionEmitter.emitExpression(expr, ctx),
       )

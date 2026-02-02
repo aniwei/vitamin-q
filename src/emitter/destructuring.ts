@@ -14,6 +14,10 @@ export type DestructuringAssignmentTarget = ts.ObjectLiteralExpression | ts.Arra
  * @see js_parse_destructuring_element
  */
 export class DestructuringEmitter {
+  /**
+   * @source QuickJS/src/core/parser.c:4272-4590
+   * @see js_parse_destructuring_element
+   */
   emitBindingPattern(
     pattern: DestructuringTarget,
     initializer: ts.Expression,
@@ -31,6 +35,10 @@ export class DestructuringEmitter {
     }
   }
 
+  /**
+   * @source QuickJS/src/core/parser.c:4272-4590
+   * @see js_parse_destructuring_element
+   */
   emitBindingPatternFromValue(
     pattern: DestructuringTarget,
     context: EmitterContext,
@@ -47,6 +55,10 @@ export class DestructuringEmitter {
     }
   }
 
+  /**
+   * @source QuickJS/src/core/parser.c:4590-4794
+   * @see js_parse_destructuring_element
+   */
   emitAssignmentPattern(
     pattern: DestructuringAssignmentTarget,
     right: ts.Expression,

@@ -15,6 +15,10 @@ export type ExpressionEmitterFn = (node: ts.Expression, context: EmitterContext)
 export class AssignmentEmitter {
   private destructuringEmitter = new DestructuringEmitter()
 
+  /**
+   * @source QuickJS/src/core/parser.c:5995-6280
+   * @see js_parse_assign_expr2
+   */
   emitAssignment(node: ts.BinaryExpression, context: EmitterContext, emitExpression: ExpressionEmitterFn) {
     const opKind = node.operatorToken.kind
     switch (opKind) {
@@ -44,6 +48,10 @@ export class AssignmentEmitter {
     this.emitCompoundAssignment(node.left, node.right, compoundOpcode, context, emitExpression)
   }
 
+  /**
+   * @source QuickJS/src/core/parser.c:6215-6280
+   * @see js_parse_assign_expr2
+   */
   private emitSimpleAssignment(
     left: ts.Expression,
     right: ts.Expression,
@@ -123,6 +131,10 @@ export class AssignmentEmitter {
     throw new Error(`未支持的赋值左值: ${ts.SyntaxKind[left.kind]}`)
   }
 
+  /**
+   * @source QuickJS/src/core/parser.c:6160-6215
+   * @see js_parse_assign_expr2
+   */
   private emitCompoundAssignment(
     left: ts.Expression,
     right: ts.Expression,
@@ -167,6 +179,10 @@ export class AssignmentEmitter {
     throw new Error(`未支持的赋值左值: ${ts.SyntaxKind[left.kind]}`)
   }
 
+  /**
+   * @source QuickJS/src/core/parser.c:6160-6215
+   * @see js_parse_assign_expr2
+   */
   private emitLogicalAssignment(
     left: ts.Expression,
     right: ts.Expression,

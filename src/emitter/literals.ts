@@ -23,6 +23,10 @@ import { FunctionEmitter } from './functions'
 export class LiteralEmitter {
   private functionEmitter = new FunctionEmitter()
 
+  /**
+   * @source QuickJS/src/core/parser.c:2928-3042
+   * @see js_parse_array_literal
+   */
   emitArrayLiteral(node: ts.ArrayLiteralExpression, context: EmitterContext, emitExpression: ExpressionEmitterFn) {
     const elements = node.elements
     const hasSpread = elements.some(element => ts.isSpreadElement(element))
@@ -125,6 +129,10 @@ export class LiteralEmitter {
     }
   }
 
+  /**
+   * @source QuickJS/src/core/parser.c:3760-3885
+   * @see js_parse_object_literal
+   */
   emitObjectLiteral(node: ts.ObjectLiteralExpression, context: EmitterContext, emitExpression: ExpressionEmitterFn) {
     context.bytecode.emitOp(Opcode.OP_object)
 
@@ -203,7 +211,8 @@ export class LiteralEmitter {
         continue
       }
 
-      throw new Error(`未支持的对象字面量成员: ${ts.SyntaxKind[prop.kind]}`)
+      const propKind = (prop as ts.Node).kind
+      throw new Error(`未支持的对象字面量成员: ${ts.SyntaxKind[propKind]}`)
     }
   }
 

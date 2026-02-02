@@ -122,10 +122,18 @@ export class ExpressionEmitter {
     }
   }
 
+  /**
+   * @source QuickJS/src/core/parser.c:4154-4165
+   * @see js_parse_expr_paren
+   */
   private emitParenthesizedExpression(node: ts.ParenthesizedExpression, context: EmitterContext) {
     this.emitExpression(node.expression, context)
   }
 
+  /**
+   * @source QuickJS/src/core/parser.c:4848-4870
+   * @see js_parse_postfix_expr
+   */
   private emitNumericLiteral(node: ts.NumericLiteral, context: EmitterContext) {
     const value = Number(node.text)
     if (isInt32(value)) {
@@ -136,18 +144,34 @@ export class ExpressionEmitter {
     }
   }
 
+  /**
+   * @source QuickJS/src/core/parser.c:2928-3042
+   * @see js_parse_array_literal
+   */
   private emitArrayLiteralExpression(node: ts.ArrayLiteralExpression, context: EmitterContext) {
     this.literalEmitter.emitArrayLiteral(node, context, this.emitExpression.bind(this))
   }
 
+  /**
+   * @source QuickJS/src/core/parser.c:3760-3885
+   * @see js_parse_object_literal
+   */
   private emitObjectLiteralExpression(node: ts.ObjectLiteralExpression, context: EmitterContext) {
     this.literalEmitter.emitObjectLiteral(node, context, this.emitExpression.bind(this))
   }
 
+  /**
+   * @source QuickJS/src/core/parser.c:4852-4866
+   * @see js_parse_postfix_expr
+   */
   private emitBigIntLiteral(node: ts.BigIntLiteral, context: EmitterContext) {
     emitPushConst(context, BigInt(node.text.replace(/n$/, '')))
   }
 
+  /**
+   * @source QuickJS/src/core/parser.c:4877-4884
+   * @see js_parse_postfix_expr
+   */
   private emitStringLiteralExpression(
     node: ts.StringLiteral | ts.NoSubstitutionTemplateLiteral,
     context: EmitterContext,
@@ -155,26 +179,50 @@ export class ExpressionEmitter {
     emitStringLiteral(context, node.text)
   }
 
+  /**
+   * @source QuickJS/src/core/parser.c:4888-4927
+   * @see js_parse_postfix_expr
+   */
   private emitRegExpLiteralExpression(node: ts.RegularExpressionLiteral, context: EmitterContext) {
     emitRegexpLiteral(node.text, context)
   }
 
+  /**
+   * @source QuickJS/src/core/parser.c:4929-4936
+   * @see js_parse_postfix_expr
+   */
   private emitFunctionLikeExpression(node: ts.FunctionExpression | ts.ArrowFunction, context: EmitterContext) {
     this.functionEmitter.emitFunctionExpression(node, context)
   }
 
+  /**
+   * @source QuickJS/src/core/parser.c:4938-4941
+   * @see js_parse_postfix_expr
+   */
   private emitClassExpressionNode(node: ts.ClassExpression, context: EmitterContext) {
     this.classEmitter.emitClassExpression(node, context, this.emitExpression.bind(this))
   }
 
+  /**
+   * @source QuickJS/src/core/parser.c:4954-4961
+   * @see js_parse_postfix_expr
+   */
   private emitBooleanLiteral(kind: ts.SyntaxKind.TrueKeyword | ts.SyntaxKind.FalseKeyword, context: EmitterContext) {
     context.bytecode.emitOp(kind === ts.SyntaxKind.TrueKeyword ? Opcode.OP_push_true : Opcode.OP_push_false)
   }
 
+  /**
+   * @source QuickJS/src/core/parser.c:4942-4945
+   * @see js_parse_postfix_expr
+   */
   private emitNullLiteral(context: EmitterContext) {
     context.bytecode.emitOp(Opcode.OP_null)
   }
 
+  /**
+   * @source QuickJS/src/core/parser.c:4947-4952
+   * @see js_parse_postfix_expr
+   */
   private emitThisExpression(context: EmitterContext) {
     const thisIndex = context.getSpecialVar('this')
     if (thisIndex !== undefined) {
@@ -185,10 +233,18 @@ export class ExpressionEmitter {
     }
   }
 
+  /**
+   * @source QuickJS/src/core/parser.c:5047-5073
+   * @see js_parse_postfix_expr
+   */
   private emitSuperExpression(context: EmitterContext) {
     context.bytecode.emitOp(Opcode.OP_get_super)
   }
 
+  /**
+   * @source QuickJS/src/core/parser.c:5995-6150
+   * @see js_parse_assign_expr2
+   */
   private emitYieldExpression(node: ts.YieldExpression, context: EmitterContext) {
     if (!context.inGenerator) {
       throw new Error('yield 只能出现在生成器函数中')
@@ -209,6 +265,10 @@ export class ExpressionEmitter {
     this.generatorEmitter.emitYieldExpression(node, context, this.emitExpression.bind(this))
   }
 
+  /**
+   * @source QuickJS/src/core/parser.c:4962-5030
+   * @see js_parse_postfix_expr
+   */
   private emitIdentifier(node: ts.Identifier, context: EmitterContext) {
     const atom = context.getAtom(node.text)
     const scopeLevel = context.scopes.scopeLevel
@@ -276,6 +336,10 @@ export class ExpressionEmitter {
     context.bytecode.emitAtom(atom)
   }
 
+  /**
+   * @source QuickJS/src/core/parser.c:5125-5510
+   * @see js_parse_postfix_expr
+   */
   private emitPropertyAccessChain(node: ts.PropertyAccessChain, context: EmitterContext) {
     if (node.expression.kind === ts.SyntaxKind.SuperKeyword) {
       throw new Error('super optional chaining 尚未实现')
@@ -286,6 +350,10 @@ export class ExpressionEmitter {
     context.bytecode.emitAtom(atom)
   }
 
+  /**
+   * @source QuickJS/src/core/parser.c:5440-5475
+   * @see js_parse_postfix_expr
+   */
   private emitPropertyAccessExpression(node: ts.PropertyAccessExpression, context: EmitterContext) {
     if (ts.isPrivateIdentifier(node.name)) {
       const binding = context.getPrivateBinding(node.name.text)
@@ -321,6 +389,10 @@ export class ExpressionEmitter {
     context.bytecode.emitAtom(atom)
   }
 
+  /**
+   * @source QuickJS/src/core/parser.c:2460-2570
+   * @see js_parse_template
+   */
   private emitTemplateExpression(node: ts.TemplateExpression, context: EmitterContext) {
     emitStringLiteral(context, node.head.text)
     for (const span of node.templateSpans) {
@@ -331,6 +403,11 @@ export class ExpressionEmitter {
     }
   }
 
+  /**
+   * @source QuickJS/src/core/parser.c:5008-5024 (new.target)
+   * @source QuickJS/src/core/parser.c:5075-5096 (import.meta)
+   * @see js_parse_postfix_expr
+   */
   private emitMetaProperty(node: ts.MetaProperty, context: EmitterContext) {
     if (node.keywordToken === ts.SyntaxKind.ImportKeyword && node.name.text === 'meta') {
       context.bytecode.emitOp(Opcode.OP_special_object)
@@ -349,6 +426,10 @@ export class ExpressionEmitter {
     }
   }
 
+  /**
+   * @source QuickJS/src/core/parser.c:5125-5510
+   * @see js_parse_postfix_expr
+   */
   private emitElementAccessChain(node: ts.ElementAccessChain, context: EmitterContext) {
     if (node.expression.kind === ts.SyntaxKind.SuperKeyword) {
       throw new Error('super optional chaining 尚未实现')
@@ -358,6 +439,10 @@ export class ExpressionEmitter {
     context.bytecode.emitOp(TempOpcode.OP_get_array_el_opt_chain)
   }
 
+  /**
+   * @source QuickJS/src/core/parser.c:5479-5491
+   * @see js_parse_postfix_expr
+   */
   private emitElementAccessExpression(node: ts.ElementAccessExpression, context: EmitterContext) {
     if (node.expression.kind === ts.SyntaxKind.SuperKeyword) {
       context.bytecode.emitOp(Opcode.OP_get_super)
@@ -370,6 +455,11 @@ export class ExpressionEmitter {
     context.bytecode.emitOp(Opcode.OP_get_array_el)
   }
 
+  /**
+   * @source QuickJS/src/core/parser.c:5008-5042
+   * @source QuickJS/src/core/parser.c:5406-5425
+   * @see js_parse_postfix_expr
+   */
   private emitNewExpression(node: ts.NewExpression, context: EmitterContext) {
     this.emitExpression(node.expression, context)
     context.bytecode.emitOp(Opcode.OP_dup)
@@ -381,6 +471,11 @@ export class ExpressionEmitter {
     context.bytecode.emitU16(args.length)
   }
 
+  /**
+   * @source QuickJS/src/core/parser.c:5320-5425
+   * @source QuickJS/src/core/parser.c:5125-5510 (optional chaining)
+   * @see js_parse_postfix_expr
+   */
   private emitCallExpression(node: ts.CallExpression | ts.CallChain, context: EmitterContext) {
     if (node.expression.kind === ts.SyntaxKind.ImportKeyword) {
       if (node.arguments.length !== 1) {
@@ -539,6 +634,10 @@ export class ExpressionEmitter {
     context.bytecode.emitU16(node.arguments.length)
   }
 
+  /**
+   * @source QuickJS/src/core/parser.c:5658-5686
+   * @see js_parse_unary
+   */
   private emitTypeOfExpression(node: ts.TypeOfExpression, context: EmitterContext) {
     if (ts.isIdentifier(node.expression)) {
       this.emitTypeofIdentifier(node.expression, context)
@@ -548,15 +647,26 @@ export class ExpressionEmitter {
     context.bytecode.emitOp(Opcode.OP_typeof)
   }
 
+  /**
+   * @source QuickJS/src/core/parser.c:5686-5699
+   * @see js_parse_unary
+   */
   private emitAwaitExpression(node: ts.AwaitExpression, context: EmitterContext) {
     this.emitExpression(node.expression, context)
     context.bytecode.emitOp(Opcode.OP_await)
   }
 
+  /**
+   * @note QuickJS 不包含 TS 类型断言，保持透传表达式。
+   */
   private emitTypeCastExpression(node: ts.AsExpression | ts.TypeAssertion, context: EmitterContext) {
     this.emitExpression(node.expression, context)
   }
 
+  /**
+   * @source QuickJS/src/core/parser.c:5602-5648
+   * @see js_parse_unary
+   */
   private emitPrefixUnaryExpression(node: ts.PrefixUnaryExpression, context: EmitterContext) {
     switch (node.operator) {
       case ts.SyntaxKind.PlusPlusToken:
@@ -582,6 +692,10 @@ export class ExpressionEmitter {
     }
   }
 
+  /**
+   * @source QuickJS/src/core/parser.c:5700-5732
+   * @see js_parse_unary
+   */
   private emitPostfixUnaryExpression(node: ts.PostfixUnaryExpression, context: EmitterContext) {
     switch (node.operator) {
       case ts.SyntaxKind.PlusPlusToken:
@@ -595,6 +709,12 @@ export class ExpressionEmitter {
     }
   }
 
+  /**
+   * @source QuickJS/src/core/parser.c:5860-5980
+   * @see js_parse_expr_binary
+   * @see js_parse_logical_and_or
+   * @see js_parse_coalesce_expr
+   */
   private emitBinaryExpression(node: ts.BinaryExpression, context: EmitterContext) {
     const opKind = node.operatorToken.kind
     if (opKind === ts.SyntaxKind.InKeyword && ts.isPrivateIdentifier(node.left)) {
@@ -652,6 +772,10 @@ export class ExpressionEmitter {
     context.bytecode.emitOp(opcode)
   }
 
+  /**
+   * @source QuickJS/src/core/parser.c:5985-6030
+   * @see js_parse_cond_expr
+   */
   private emitConditionalExpression(node: ts.ConditionalExpression, context: EmitterContext) {
     this.emitExpression(node.condition, context)
     const falseLabel = context.labels.emitGoto(Opcode.OP_if_false, -1)

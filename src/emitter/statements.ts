@@ -1,6 +1,6 @@
 import ts from 'typescript'
 
-import { FOR_OF_NEXT_OPERAND_DEFAULT, JS_ATOM__with_, JSVarKindEnum, Opcode } from '../env'
+import { FOR_OF_NEXT_OPERAND_DEFAULT, JSAtom, JSVarKindEnum, Opcode } from '../env'
 import type { EmitterContext } from './emitter'
 import type { ExpressionEmitterFn } from './assignment'
 import { DestructuringEmitter } from './destructuring'
@@ -34,6 +34,10 @@ export class StatementEmitter {
     return this.loopStack[this.loopStack.length - 1]
   }
 
+  /**
+   * @source QuickJS/src/core/parser.c:7010-7064
+   * @see js_parse_statement_or_decl
+   */
   emitIfStatement(
     node: ts.IfStatement,
     context: EmitterContext,
@@ -69,6 +73,10 @@ export class StatementEmitter {
     context.labels.emitLabel(falseLabel)
   }
 
+  /**
+   * @source QuickJS/src/core/parser.c:6956-6988
+   * @see js_parse_statement_or_decl
+   */
   emitVariableStatement(
     node: ts.VariableStatement,
     context: EmitterContext,
@@ -132,11 +140,19 @@ export class StatementEmitter {
     }
   }
 
+  /**
+   * @source QuickJS/src/core/parser.c:7629-7670
+   * @see js_parse_statement_or_decl
+   */
   emitFunctionDeclaration(node: ts.FunctionDeclaration, context: EmitterContext) {
     context.emitSourcePos(node)
     this.functionEmitter.emitFunctionDeclaration(node, context)
   }
 
+  /**
+   * @source QuickJS/src/core/parser.c:7674-7686
+   * @see js_parse_statement_or_decl
+   */
   emitClassDeclaration(
     node: ts.ClassDeclaration,
     context: EmitterContext,
@@ -145,6 +161,10 @@ export class StatementEmitter {
     this.classEmitter.emitClassDeclaration(node, context, emitExpression)
   }
 
+  /**
+   * @source QuickJS/src/core/parser.c:6898-6932
+   * @see js_parse_statement_or_decl
+   */
   emitReturnStatement(
     node: ts.ReturnStatement,
     context: EmitterContext,
@@ -170,6 +190,10 @@ export class StatementEmitter {
     }
   }
 
+  /**
+   * @source QuickJS/src/core/parser.c:6934-6955
+   * @see js_parse_statement_or_decl
+   */
   emitThrowStatement(
     node: ts.ThrowStatement,
     context: EmitterContext,
@@ -180,6 +204,10 @@ export class StatementEmitter {
     context.bytecode.emitOp(Opcode.OP_throw)
   }
 
+  /**
+   * @source QuickJS/src/core/parser.c:7345-7690
+   * @see js_parse_statement_or_decl
+   */
   emitTryStatement(
     node: ts.TryStatement,
     context: EmitterContext,
@@ -249,6 +277,10 @@ export class StatementEmitter {
     context.labels.emitLabel(endLabel)
   }
 
+  /**
+   * @source QuickJS/src/core/parser.c:7210-7339
+   * @see js_parse_statement_or_decl
+   */
   emitSwitchStatement(
     node: ts.SwitchStatement,
     context: EmitterContext,
@@ -288,6 +320,11 @@ export class StatementEmitter {
     context.bytecode.emitOp(Opcode.OP_drop)
   }
 
+  /**
+   * @source QuickJS/src/core/parser.c:6691-6840
+   * @source QuickJS/src/core/parser.c:6840-6935
+   * @see js_parse_for_in_of
+   */
   emitForInStatement(
     node: ts.ForInStatement,
     context: EmitterContext,
@@ -320,6 +357,11 @@ export class StatementEmitter {
     context.bytecode.emitOp(Opcode.OP_drop)
   }
 
+  /**
+   * @source QuickJS/src/core/parser.c:6691-6840
+   * @source QuickJS/src/core/parser.c:6840-6935
+   * @see js_parse_for_in_of
+   */
   emitForOfStatement(
     node: ts.ForOfStatement,
     context: EmitterContext,
@@ -368,11 +410,19 @@ export class StatementEmitter {
     context.bytecode.emitOp(Opcode.OP_iterator_close)
   }
 
+  /**
+   * @source QuickJS/src/core/parser.c:7700-7715
+   * @see js_parse_statement_or_decl
+   */
   emitDebuggerStatement(node: ts.DebuggerStatement, context: EmitterContext) {
     context.emitSourcePos(node)
     context.bytecode.emitOp(Opcode.OP_debugger)
   }
 
+  /**
+   * @source QuickJS/src/core/parser.c:7716-7753
+   * @see js_parse_statement_or_decl
+   */
   emitWithStatement(
     node: ts.WithStatement,
     context: EmitterContext,
@@ -382,7 +432,7 @@ export class StatementEmitter {
     context.emitSourcePos(node)
     emitExpression(node.expression, context)
     context.pushScope()
-    const withIdx = context.scopes.addScopeVar(JS_ATOM__with_, JSVarKindEnum.JS_VAR_NORMAL)
+    const withIdx = context.scopes.addScopeVar(JSAtom.JS_ATOM__with_, JSVarKindEnum.JS_VAR_NORMAL)
     context.bytecode.emitOp(Opcode.OP_set_loc_uninitialized)
     context.bytecode.emitU16(withIdx)
     context.bytecode.emitOp(Opcode.OP_to_object)
@@ -393,6 +443,10 @@ export class StatementEmitter {
     context.popScope()
   }
 
+  /**
+   * @source QuickJS/src/core/parser.c:7065-7095
+   * @see js_parse_statement_or_decl
+   */
   emitWhileStatement(
     node: ts.WhileStatement,
     context: EmitterContext,
@@ -415,6 +469,10 @@ export class StatementEmitter {
     context.labels.emitLabel(endLabel)
   }
 
+  /**
+   * @source QuickJS/src/core/parser.c:7096-7124
+   * @see js_parse_statement_or_decl
+   */
   emitDoWhileStatement(
     node: ts.DoStatement,
     context: EmitterContext,
@@ -437,6 +495,10 @@ export class StatementEmitter {
     context.labels.emitLabel(endLabel)
   }
 
+  /**
+   * @source QuickJS/src/core/parser.c:7125-7205
+   * @see js_parse_statement_or_decl
+   */
   emitForStatement(
     node: ts.ForStatement,
     context: EmitterContext,
@@ -486,6 +548,10 @@ export class StatementEmitter {
     context.labels.emitLabel(endLabel)
   }
 
+  /**
+   * @source QuickJS/src/core/parser.c:7190-7210
+   * @see js_parse_statement_or_decl
+   */
   emitBreakStatement(node: ts.BreakStatement, context: EmitterContext) {
     context.emitSourcePos(node)
     const loop = this.currentLoop()
@@ -495,6 +561,10 @@ export class StatementEmitter {
     context.labels.emitGoto(Opcode.OP_goto, loop.breakLabel)
   }
 
+  /**
+   * @source QuickJS/src/core/parser.c:7190-7210
+   * @see js_parse_statement_or_decl
+   */
   emitContinueStatement(node: ts.ContinueStatement, context: EmitterContext) {
     context.emitSourcePos(node)
     const loop = this.currentLoop()
@@ -540,7 +610,8 @@ export class StatementEmitter {
         this.destructuringEmitter.emitBindingPatternFromValue(decl.name, context, emitExpression)
         return
       }
-      throw new Error(`未支持的 for-in/of 变量声明: ${ts.SyntaxKind[decl.name.kind]}`)
+      const declKind = (decl.name as ts.Node).kind
+      throw new Error(`未支持的 for-in/of 变量声明: ${ts.SyntaxKind[declKind]}`)
     }
 
     if (ts.isIdentifier(initializer)) {
@@ -563,7 +634,8 @@ export class StatementEmitter {
       return { kind: 'pattern' as const, pattern: decl.name }
     }
     if (!ts.isIdentifier(decl.name)) {
-      throw new Error(`未支持的 for-in/of 变量声明: ${ts.SyntaxKind[decl.name.kind]}`)
+      const declKind = (decl.name as ts.Node).kind
+      throw new Error(`未支持的 for-in/of 变量声明: ${ts.SyntaxKind[declKind]}`)
     }
 
     const atom = context.getAtom(decl.name.text)
