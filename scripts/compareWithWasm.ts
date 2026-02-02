@@ -9,13 +9,13 @@ import { AtomTable } from '../src/emitter/atom-table'
 import { OPCODE_BY_CODE, TEMP_OPCODE_BY_CODE } from '../src/env'
 import { QuickJSLib } from './QuickJSLib'
 
-type CompareResult = {
+export type CompareResult = {
 	file: string
 	status: 'pass' | 'fail'
 	error?: string
 }
 
-const FIXTURES_DIR = path.resolve(process.cwd(), 'fixtures/basic')
+const DEFAULT_FIXTURES_DIR = path.resolve(process.cwd(), 'fixtures/basic')
 
 const decodeOpcodes = (bytes: Uint8Array): string[] => {
 	const ops: string[] = []
@@ -190,7 +190,7 @@ const debugDiffSlice = (ours: string[], wasm: string[], filePath: string) => {
 	console.log('wasm slice', wasm.slice(start, end))
 }
 
-const collectFixtures = async (dir: string): Promise<string[]> => {
+export const collectFixtures = async (dir: string): Promise<string[]> => {
 	const entries = await fs.readdir(dir, { withFileTypes: true })
 	const files: string[] = []
 	for (const entry of entries) {
@@ -204,7 +204,7 @@ const collectFixtures = async (dir: string): Promise<string[]> => {
 	return files
 }
 
-const compareFixture = async (filePath: string): Promise<CompareResult> => {
+export const compareFixture = async (filePath: string): Promise<CompareResult> => {
 	try {
 		const source = await fs.readFile(filePath, 'utf8')
 		const ours = normalizeOpcodes(compileEmitterOpcodes(source, filePath))
@@ -221,18 +221,29 @@ const compareFixture = async (filePath: string): Promise<CompareResult> => {
 	}
 }
 
-const main = async () => {
-	console.log(`Comparing fixtures in ${FIXTURES_DIR}`)
-	const fixtures = await collectFixtures(FIXTURES_DIR)
+export const compareFixtures = async (
+	dirs: string[],
+	options: { maxFiles?: number } = {},
+): Promise<CompareResult[]> => {
 	const results: CompareResult[] = []
+	const maxFiles = options.maxFiles ?? (() => {
+		const raw = process.env.COMPARE_MAX_FILES
+		if (!raw) return undefined
+		const parsed = Number(raw)
+		return Number.isFinite(parsed) && parsed > 0 ? parsed : undefined
+	})()
 
-	for (const file of fixtures) {
-		const result = await compareFixture(file)
-		results.push(result)
-		const status = result.status === 'pass' ? '✅' : '❌'
-		const rel = path.relative(process.cwd(), file)
-		const msg = result.error ? ` (${result.error})` : ''
-		console.log(`${status} ${rel}${msg}`)
+	for (const dir of dirs) {
+		const fixtures = await collectFixtures(dir)
+		const slice = maxFiles ? fixtures.slice(0, maxFiles) : fixtures
+		for (const file of slice) {
+			const result = await compareFixture(file)
+			results.push(result)
+			const status = result.status === 'pass' ? '✅' : '❌'
+			const rel = path.relative(process.cwd(), file)
+			const msg = result.error ? ` (${result.error})` : ''
+			console.log(`${status} ${rel}${msg}`)
+		}
 	}
 
 	const passed = results.filter(r => r.status === 'pass').length
@@ -242,10 +253,19 @@ const main = async () => {
 	if (failed > 0) {
 		process.exitCode = 1
 	}
+
+	return results
 }
 
-main().catch((error) => {
-	console.error(String(error))
-	process.exit(1)
-})
+const main = async () => {
+	console.log(`Comparing fixtures in ${DEFAULT_FIXTURES_DIR}`)
+	await compareFixtures([DEFAULT_FIXTURES_DIR])
+}
+
+if (require.main === module) {
+	main().catch((error) => {
+		console.error(String(error))
+		process.exit(1)
+	})
+}
 

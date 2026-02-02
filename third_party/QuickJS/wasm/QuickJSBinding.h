@@ -142,6 +142,40 @@ struct ScopeManagerSnapshot {
   int32_t scopeFirst;
 };
 
+struct BlockEnvSnapshot {
+  int32_t prev;
+  int32_t labelName;
+  int32_t labelBreak;
+  int32_t labelCont;
+  int32_t dropCount;
+  int32_t labelFinally;
+  int32_t scopeLevel;
+  int32_t hasIterator;
+  int32_t isRegularStmt;
+};
+
+struct BlockManagerSnapshot {
+  std::vector<BlockEnvSnapshot> entries;
+  int32_t top;
+};
+
+struct ImportEntrySnapshot {
+  std::string moduleName;
+  std::string importName;
+  int32_t isStar;
+};
+
+struct ExportEntrySnapshot {
+  std::string localName;
+  std::string exportName;
+  int32_t exportType;
+};
+
+struct ModuleScenarioSnapshot {
+  std::vector<ImportEntrySnapshot> imports;
+  std::vector<ExportEntrySnapshot> exports;
+};
+
 class QuickJSBinding {
   using Ptr = std::shared_ptr<QuickJSBinding>;
 
@@ -237,6 +271,11 @@ class QuickJSBinding {
     uint8_t kindB,
     uint8_t kindC);
 
+  static BlockManagerSnapshot getBlockManagerScenario();
+  static ModuleScenarioSnapshot getModuleScenario();
+  static std::vector<uint8_t> getSerializerScenario();
+  static std::vector<uint8_t> getCompilerScenario();
+
   static std::vector<Atom> getAtoms();
   static std::vector<Atom> getEnvironmentAtoms();
   static std::vector<OpFmt> getOpcodeFormats();
@@ -250,5 +289,14 @@ class QuickJSBinding {
   static std::string runWithBinary(
     std::vector<uint8_t> bytes, 
     std::vector<std::string> modules);
+
+  static std::vector<uint8_t> optimizePeephole(
+    std::vector<uint8_t> bytes);
+
+  static std::vector<uint8_t> optimizeShortOpcodes(
+    std::vector<uint8_t> bytes);
+
+  static std::vector<uint8_t> optimizeDeadCode(
+    std::vector<uint8_t> bytes);
 };
 } // namespace quickjs

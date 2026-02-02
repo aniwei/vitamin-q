@@ -343,6 +343,14 @@ export interface BytecodeCompilerOptions {
   expressionStatementDrop?: boolean
 }
 
+export interface BytecodeCompilerState {
+  bytecode: BytecodeBuffer
+  labels: LabelManager
+  scopes: ScopeManager
+  inlineCache: InlineCacheManager
+  constantPool: ConstantPoolManager
+}
+
 /**
  * 主发射器（基于 AST 分发）。
  *
@@ -373,6 +381,11 @@ export class BytecodeCompiler {
    * @see js_parse_program
    */
   compile(sourceFile: ts.SourceFile): BytecodeBuffer {
+    const state = this.compileWithState(sourceFile)
+    return state.bytecode
+  }
+
+  compileWithState(sourceFile: ts.SourceFile): BytecodeCompilerState {
     const context = new EmitterContext({
       sourceFile,
       atomTable: this.options.atomTable,
@@ -382,7 +395,13 @@ export class BytecodeCompiler {
     })
 
     this.compileStatements(sourceFile.statements, context)
-    return context.bytecode.bytecode
+    return {
+      bytecode: context.bytecode.bytecode,
+      labels: context.labels,
+      scopes: context.scopes,
+      inlineCache: context.inlineCache,
+      constantPool: context.constantPool,
+    }
   }
 
   compileStatements(statements: readonly ts.Statement[], context: EmitterContext) {

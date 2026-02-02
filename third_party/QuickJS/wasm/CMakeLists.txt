@@ -38,6 +38,35 @@ target_link_libraries(quickjs_wasm PRIVATE quickjs-libc)
 target_compile_definitions(quickjs PRIVATE DUMP_BYTECODE=1)
 target_compile_definitions(quickjs_wasm PRIVATE DUMP_BYTECODE=1)
 
+# ───────────────────────────── DWARF debug options ─────────────────────────────
+set(QJS_DEBUG_DWARF "0" CACHE STRING "Enable DWARF debug info (0/1)")
+set_property(CACHE QJS_DEBUG_DWARF PROPERTY STRINGS "0" "1")
+
+set(QJS_SEPARATE_DWARF "0" CACHE STRING "Enable separate DWARF output (0/1)")
+set_property(CACHE QJS_SEPARATE_DWARF PROPERTY STRINGS "0" "1")
+
+set(QJS_SEPARATE_DWARF_URL "quickjs_wasm.debug.wasm" CACHE STRING "Separate DWARF URL")
+
+set(QJS_FNO_INLINE "0" CACHE STRING "Disable inlining for debug (0/1)")
+set_property(CACHE QJS_FNO_INLINE PROPERTY STRINGS "0" "1")
+
+if(QJS_DEBUG_DWARF STREQUAL "1")
+    target_compile_options(quickjs PRIVATE -g)
+    target_compile_options(quickjs_wasm PRIVATE -g)
+    target_link_options(quickjs_wasm PRIVATE -g)
+endif()
+
+if(QJS_SEPARATE_DWARF STREQUAL "1")
+    target_compile_options(quickjs PRIVATE -gseparate-dwarf)
+    target_compile_options(quickjs_wasm PRIVATE -gseparate-dwarf)
+    target_link_options(quickjs_wasm PRIVATE -gseparate-dwarf -sSEPARATE_DWARF_URL=${QJS_SEPARATE_DWARF_URL})
+endif()
+
+if(QJS_FNO_INLINE STREQUAL "1")
+    target_compile_options(quickjs PRIVATE -fno-inline)
+    target_compile_options(quickjs_wasm PRIVATE -fno-inline)
+endif()
+
 # ─────────────────────────── QTS tracing (optional) ───────────────────────────
 # These are intended for debugging/verification only. Default is disabled.
 # Use numeric 0/1 to avoid toolchain differences with ON/OFF.

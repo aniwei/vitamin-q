@@ -65,6 +65,13 @@ interface WasmInstance {
     cacheLine: number,
     cacheColumn: number,
   ) => { ptr: number; line: number; column: number }
+  getBlockManagerScenario: () => { entries: { size: () => number; get: (index: number) => any }; top: number }
+  getModuleScenario: () => { imports: { size: () => number; get: (index: number) => any }; exports: { size: () => number; get: (index: number) => any } }
+  getSerializerScenario: () => { size: () => number; get: (index: number) => number }
+  getCompilerScenario: () => { size: () => number; get: (index: number) => number }
+  optimizePeephole: (input: Uint8Array) => { size: () => number; get: (index: number) => number }
+  optimizeShortOpcodes: (input: Uint8Array) => { size: () => number; get: (index: number) => number }
+  optimizeDeadCode: (input: Uint8Array) => { size: () => number; get: (index: number) => number }
 }
 
 export class QuickJSLib {
@@ -77,6 +84,13 @@ export class QuickJSLib {
     'getInlineCacheAddResult',
     'getLabelManagerScenario',
     'getScopeManagerScenario',
+    'getBlockManagerScenario',
+    'getModuleScenario',
+    'getSerializerScenario',
+    'getCompilerScenario',
+    'optimizePeephole',
+    'optimizeShortOpcodes',
+    'optimizeDeadCode',
   ] as const
 
   private static outputHandlers: {
@@ -344,6 +358,100 @@ export class QuickJSLib {
     return { vars, scopes, scopeLevel: result.scopeLevel, scopeFirst: result.scopeFirst }
   }
 
+  static getBlockManagerScenario = async (): Promise<{ entries: Array<{ prev: number; labelName: number; labelBreak: number; labelCont: number; dropCount: number; labelFinally: number; scopeLevel: number; hasIterator: number; isRegularStmt: number }>; top: number }> => {
+    const WasmInstance = await QuickJSLib.getWasmInstance()
+    const result = WasmInstance.QuickJSBinding.getBlockManagerScenario()
+    const entries: Array<{ prev: number; labelName: number; labelBreak: number; labelCont: number; dropCount: number; labelFinally: number; scopeLevel: number; hasIterator: number; isRegularStmt: number }> = []
+    for (let i = 0; i < result.entries.size(); i++) {
+      const item = result.entries.get(i)
+      entries.push({
+        prev: item.prev,
+        labelName: item.labelName,
+        labelBreak: item.labelBreak,
+        labelCont: item.labelCont,
+        dropCount: item.dropCount,
+        labelFinally: item.labelFinally,
+        scopeLevel: item.scopeLevel,
+        hasIterator: item.hasIterator,
+        isRegularStmt: item.isRegularStmt,
+      })
+    }
+    return { entries, top: result.top }
+  }
+
+  static getModuleScenario = async (): Promise<{ imports: Array<{ moduleName: string; importName: string; isStar: number }>; exports: Array<{ localName: string; exportName: string; exportType: number }> }> => {
+    const WasmInstance = await QuickJSLib.getWasmInstance()
+    const result = WasmInstance.QuickJSBinding.getModuleScenario()
+    const imports: Array<{ moduleName: string; importName: string; isStar: number }> = []
+    const exports: Array<{ localName: string; exportName: string; exportType: number }> = []
+    for (let i = 0; i < result.imports.size(); i++) {
+      const item = result.imports.get(i)
+      imports.push({ moduleName: item.moduleName, importName: item.importName, isStar: item.isStar })
+    }
+    for (let i = 0; i < result.exports.size(); i++) {
+      const item = result.exports.get(i)
+      exports.push({ localName: item.localName, exportName: item.exportName, exportType: item.exportType })
+    }
+    return { imports, exports }
+  }
+
+  static async getSerializerScenario(): Promise<Uint8Array> {
+    const WasmInstance = await QuickJSLib.getWasmInstance()
+    const result = WasmInstance.QuickJSBinding.getSerializerScenario()
+    return QuickJSLib.toUint8Array(result)
+  }
+
+  static async getCompilerScenario(): Promise<Uint8Array> {
+    const WasmInstance = await QuickJSLib.getWasmInstance()
+    const result = WasmInstance.QuickJSBinding.getCompilerScenario()
+    return QuickJSLib.toUint8Array(result)
+  }
+
+  private static toUint8Array(result: { size: () => number; get: (index: number) => number }): Uint8Array {
+    const out = new Uint8Array(result.size())
+    for (let i = 0; i < out.length; i += 1) {
+      out[i] = result.get(i)
+    }
+    return out
+  }
+
+  private static toStringArray(instance: any, items: string[] = []): any {
+    const vec = new instance.StringArray()
+    for (const item of items) {
+      vec.push_back(item)
+    }
+    return vec
+  }
+
+  private static toUint8Vector(instance: any, input: Uint8Array): any {
+    const vec = new instance.Uint8Array()
+    for (const byte of input) {
+      vec.push_back(byte)
+    }
+    return vec
+  }
+
+  static async optimizePeephole(bytes: Uint8Array): Promise<Uint8Array> {
+    const WasmInstance = await QuickJSLib.getWasmInstance()
+    const vec = QuickJSLib.toUint8Vector(WasmInstance, bytes)
+    const result = WasmInstance.QuickJSBinding.optimizePeephole(vec)
+    return QuickJSLib.toUint8Array(result)
+  }
+
+  static async optimizeShortOpcodes(bytes: Uint8Array): Promise<Uint8Array> {
+    const WasmInstance = await QuickJSLib.getWasmInstance()
+    const vec = QuickJSLib.toUint8Vector(WasmInstance, bytes)
+    const result = WasmInstance.QuickJSBinding.optimizeShortOpcodes(vec)
+    return QuickJSLib.toUint8Array(result)
+  }
+
+  static async optimizeDeadCode(bytes: Uint8Array): Promise<Uint8Array> {
+    const WasmInstance = await QuickJSLib.getWasmInstance()
+    const vec = QuickJSLib.toUint8Vector(WasmInstance, bytes)
+    const result = WasmInstance.QuickJSBinding.optimizeDeadCode(vec)
+    return QuickJSLib.toUint8Array(result)
+  }
+
   static async runWithBinaryPath(binaryPath: string) {
     const WasmInstance = await QuickJSLib.getWasmInstance()
     const source = readFileSync(binaryPath)
@@ -354,6 +462,13 @@ export class QuickJSLib {
     }
 
     WasmInstance.QuickJSBinding.runWithBinary(input, new WasmInstance.StringArray())
+  }
+
+  static async runBytes(bytes: Uint8Array | Buffer, modules: string[] = []) {
+    const WasmInstance = await QuickJSLib.getWasmInstance()
+    const input = new WasmInstance.Uint8Array()
+    for (let i = 0; i < bytes.length; i++) input.push_back(bytes[i])
+    WasmInstance.QuickJSBinding.runWithBinary(input, QuickJSLib.toStringArray(WasmInstance, modules))
   }
 
   static async dumpWithBinaryPath(binaryPath: string) {

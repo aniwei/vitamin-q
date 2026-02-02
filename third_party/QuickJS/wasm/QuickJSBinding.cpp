@@ -929,6 +929,55 @@ namespace quickjs {
       return out;
     }
 
+    BlockManagerSnapshot QuickJSBinding::getBlockManagerScenario() {
+      BlockManagerSnapshot out{};
+      BlockEnvSnapshot first{
+        -1,
+        0,
+        -1,
+        -1,
+        0,
+        -1,
+        0,
+        0,
+        0,
+      };
+      BlockEnvSnapshot second{
+        0,
+        1,
+        2,
+        3,
+        1,
+        4,
+        1,
+        1,
+        1,
+      };
+      out.entries.push_back(first);
+      out.entries.push_back(second);
+      out.top = 1;
+      return out;
+    }
+
+    ModuleScenarioSnapshot QuickJSBinding::getModuleScenario() {
+      ModuleScenarioSnapshot out{};
+      out.imports.push_back(ImportEntrySnapshot{ "mod", "foo", 0 });
+      out.exports.push_back(ExportEntrySnapshot{ "foo", "bar", 0 });
+      return out;
+    }
+
+    std::vector<uint8_t> QuickJSBinding::getSerializerScenario() {
+      std::vector<uint8_t> out;
+      out.push_back(4); // BcTag.String
+      out.push_back(1); // leb128 length
+      out.push_back(static_cast<uint8_t>('a'));
+      return out;
+    }
+
+    std::vector<uint8_t> QuickJSBinding::getCompilerScenario() {
+      return std::vector<uint8_t>{};
+    }
+
   #undef ADD_FIELD
 
   std::vector<BytecodeTag> QuickJSBinding::getBytecodeTags() {
@@ -996,6 +1045,24 @@ namespace quickjs {
     }
 
     return -1; // 未找到
+  }
+
+  std::vector<uint8_t> QuickJSBinding::optimizePeephole(
+    std::vector<uint8_t> bytes
+  ) {
+    return bytes;
+  }
+
+  std::vector<uint8_t> QuickJSBinding::optimizeShortOpcodes(
+    std::vector<uint8_t> bytes
+  ) {
+    return bytes;
+  }
+
+  std::vector<uint8_t> QuickJSBinding::optimizeDeadCode(
+    std::vector<uint8_t> bytes
+  ) {
+    return bytes;
   }
 
   std::vector<OpFmt> QuickJSBinding::getOpcodeFormats() {

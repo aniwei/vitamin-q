@@ -11,6 +11,9 @@ type Options = {
   verbose?: boolean
   trace?: boolean
   traceLevel?: 1 | 2 | 3
+  debugDwarf?: boolean
+  separateDwarf?: boolean
+  fnoInline?: boolean
 }
 
 function run(
@@ -94,6 +97,12 @@ function parseArgs(): Options {
     } else if ((a === '--trace-level' || a === '--traceLevel') && args[i+1]) {
       const v = Number(args[++i])
       if (v === 1 || v === 2 || v === 3) opts.traceLevel = v
+    } else if (a === '--debug-dwarf') {
+      opts.debugDwarf = true
+    } else if (a === '--separate-dwarf') {
+      opts.separateDwarf = true
+    } else if (a === '--fno-inline') {
+      opts.fnoInline = true
     }
   }
 
@@ -183,6 +192,9 @@ function buildWasm(opts: Options) {
   const traceArgs: string[] = []
   const traceEnabled = Boolean(opts.trace)
   const traceLevel = traceEnabled ? (opts.traceLevel ?? 1) : 1
+  const debugDwarf = opts.debugDwarf ?? (opts.buildType === 'Debug')
+  const separateDwarf = opts.separateDwarf ?? false
+  const fnoInline = opts.fnoInline ?? debugDwarf
 
   // 总是显式传值，避免 CMake cache 在多次构建之间“粘住”旧值。
   traceArgs.push(`-DQTS_TRACE_ENABLED=${traceEnabled ? 1 : 0}`)
@@ -210,10 +222,17 @@ function buildWasm(opts: Options) {
     }
   }
 
+  const dwarfArgs = [
+    `-DQJS_DEBUG_DWARF=${debugDwarf ? 1 : 0}`,
+    `-DQJS_SEPARATE_DWARF=${separateDwarf ? 1 : 0}`,
+    `-DQJS_FNO_INLINE=${fnoInline ? 1 : 0}`,
+  ]
+
   const cmakeArgs = [
     `emcmake cmake -S ${JSON.stringify(wasmRoot)} -B ${JSON.stringify(buildDir)}`,
     `-DCMAKE_BUILD_TYPE=${opts.buildType}`,
-    ...traceArgs
+    ...traceArgs,
+    ...dwarfArgs
   ].join(' ')
 
   runBash(`${prefix}${cmakeArgs}`, { cwd: repoRoot, verbose: opts.verbose })
@@ -233,6 +252,11 @@ function buildWasm(opts: Options) {
   }
   const buildConfig = {
     buildType: opts.buildType,
+    dwarf: {
+      debug: debugDwarf ? 1 : 0,
+      separate: separateDwarf ? 1 : 0,
+      fnoInline: fnoInline ? 1 : 0,
+    },
     qtsTrace: {
       enabled: traceEnabled ? 1 : 0,
       level: traceLevel,

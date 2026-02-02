@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
+import fs from 'node:fs'
 import ts from 'typescript'
 
 import { QuickJSLib } from '../../../scripts/QuickJSLib'
@@ -188,13 +189,19 @@ const toCamel = (name: string): string =>
 
 const mapCFieldToTs = (name: string): string => overrides[name] ?? toCamel(name)
 
+const sourceCache = new Map<string, ts.SourceFile>()
+
+const loadSourceFile = (filePath: string): ts.SourceFile => {
+  const cached = sourceCache.get(filePath)
+  if (cached) return cached
+  const content = fs.readFileSync(filePath, 'utf8')
+  const source = ts.createSourceFile(filePath, content, ts.ScriptTarget.ES2020, true)
+  sourceCache.set(filePath, source)
+  return source
+}
+
 const collectInterfaceProps = (filePath: string, interfaceName: string): Set<string> => {
-  const program = ts.createProgram([filePath], {
-    target: ts.ScriptTarget.ES2020,
-    module: ts.ModuleKind.CommonJS,
-  })
-  const source = program.getSourceFile(filePath)
-  assert.ok(source, `${filePath} 无法读取`)
+  const source = loadSourceFile(filePath)
 
   const props = new Set<string>()
   const visit = (node: ts.Node) => {

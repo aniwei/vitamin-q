@@ -25,6 +25,9 @@ EMSCRIPTEN_BINDINGS(quickjs_wasm) {
   register_vector<LabelSlotInfo>("LabelSlotInfoArray");
   register_vector<ScopeVarSnapshot>("ScopeVarSnapshotArray");
   register_vector<ScopeScopeSnapshot>("ScopeScopeSnapshotArray");
+  register_vector<BlockEnvSnapshot>("BlockEnvSnapshotArray");
+  register_vector<ImportEntrySnapshot>("ImportEntrySnapshotArray");
+  register_vector<ExportEntrySnapshot>("ExportEntrySnapshotArray");
 
   class_<LineCol>("LineCol")
     .constructor<>()
@@ -160,6 +163,40 @@ EMSCRIPTEN_BINDINGS(quickjs_wasm) {
     .property("scopeLevel", &ScopeManagerSnapshot::scopeLevel)
     .property("scopeFirst", &ScopeManagerSnapshot::scopeFirst);
 
+  class_<BlockEnvSnapshot>("BlockEnvSnapshot")
+    .constructor<>()
+    .property("prev", &BlockEnvSnapshot::prev)
+    .property("labelName", &BlockEnvSnapshot::labelName)
+    .property("labelBreak", &BlockEnvSnapshot::labelBreak)
+    .property("labelCont", &BlockEnvSnapshot::labelCont)
+    .property("dropCount", &BlockEnvSnapshot::dropCount)
+    .property("labelFinally", &BlockEnvSnapshot::labelFinally)
+    .property("scopeLevel", &BlockEnvSnapshot::scopeLevel)
+    .property("hasIterator", &BlockEnvSnapshot::hasIterator)
+    .property("isRegularStmt", &BlockEnvSnapshot::isRegularStmt);
+
+  class_<BlockManagerSnapshot>("BlockManagerSnapshot")
+    .constructor<>()
+    .property("entries", &BlockManagerSnapshot::entries)
+    .property("top", &BlockManagerSnapshot::top);
+
+  class_<ImportEntrySnapshot>("ImportEntrySnapshot")
+    .constructor<>()
+    .property("moduleName", &ImportEntrySnapshot::moduleName)
+    .property("importName", &ImportEntrySnapshot::importName)
+    .property("isStar", &ImportEntrySnapshot::isStar);
+
+  class_<ExportEntrySnapshot>("ExportEntrySnapshot")
+    .constructor<>()
+    .property("localName", &ExportEntrySnapshot::localName)
+    .property("exportName", &ExportEntrySnapshot::exportName)
+    .property("exportType", &ExportEntrySnapshot::exportType);
+
+  class_<ModuleScenarioSnapshot>("ModuleScenarioSnapshot")
+    .constructor<>()
+    .property("imports", &ModuleScenarioSnapshot::imports)
+    .property("exports", &ModuleScenarioSnapshot::exports);
+
   class_<QuickJSBinding>("QuickJSBinding")
     .constructor<>()
     .class_function("compile", &QuickJSBinding::compile)
@@ -207,5 +244,12 @@ EMSCRIPTEN_BINDINGS(quickjs_wasm) {
     .class_function("getInlineCacheAddResult", &QuickJSBinding::getInlineCacheAddResult)
     .class_function("getLabelManagerScenario", &QuickJSBinding::getLabelManagerScenario)
     .class_function("getScopeManagerScenario", &QuickJSBinding::getScopeManagerScenario)
+    .class_function("getBlockManagerScenario", &QuickJSBinding::getBlockManagerScenario)
+    .class_function("getModuleScenario", &QuickJSBinding::getModuleScenario)
+    .class_function("getSerializerScenario", &QuickJSBinding::getSerializerScenario)
+    .class_function("getCompilerScenario", &QuickJSBinding::getCompilerScenario)
+    .class_function("optimizePeephole", &QuickJSBinding::optimizePeephole)
+    .class_function("optimizeShortOpcodes", &QuickJSBinding::optimizeShortOpcodes)
+    .class_function("optimizeDeadCode", &QuickJSBinding::optimizeDeadCode)
     .smart_ptr<std::shared_ptr<QuickJSBinding>>("shared_ptr<QuickJSBinding>");
 }

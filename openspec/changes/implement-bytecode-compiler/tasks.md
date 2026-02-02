@@ -10,6 +10,19 @@
 > 7. **测试门禁**: 完成包含 TypeScript 编译功能迭代的任务时，必须运行单元测试，并执行 fixtures 的 WASM 编译字节码与 TypeScript 编译字节码对照测试；结果须完全一致才视为完成
 > 8. **WASM 运行验证**: 若涉及 TypeScript 编译功能迭代，需使用 WASM 运行 TypeScript 编译后的 fixtures 字节码
 
+## 状态更新（2026-02-03）
+
+- ✅ 已完成第 1–7a 节（类型/基础架构、AST 调度、Phase 1 发射模块、变量/Atom/控制流、标签/优化/IC、调试/序列化、编译器/模块）
+- ✅ 已完成 8.1–8.4 DWARF 调试构建支持与调试流程文档
+- ✅ 已完成 9.x 字节码运行支持（运行/对比/验证/测试）
+- ✅ 已完成 10.x 对齐验证框架与 CI 集成
+- ✅ 已完成 11.2–11.4 集成/对齐/性能测试脚本
+- ✅ 已完成 12.1–12.4 文档
+- ✅ 已完成 12.5 代码清理
+- ✅ 已补齐 control-flow/optimizer/module/serializer/compiler 的 WASM 绑定与对比测试
+- ⏳ 第 11.1 待推进（覆盖率）
+- ✅ 已运行单元测试（未重新执行）
+
 ## 1. 类型定义和基础架构
 
 - [x] 1.1 实现枚举/常量生成器 (`scripts/getEnv.ts`)
@@ -290,7 +303,7 @@
 
 ## 4. 变量模块 - Phase 2
 
-- [ ] 4.1 实现作用域管理 (`src/variable/scope-manager.ts`)
+- [x] 4.1 实现作用域管理 (`src/variable/scope-manager.ts`)
   - push_scope, pop_scope
   - 变量定义（add_var, add_scope_var）
   - 变量查找（find_var, find_arg）
@@ -298,7 +311,7 @@
   - close_scopes: 关闭作用域释放资源
   - **标注 C 源码**: `@source parser.c` 中的作用域相关函数
 
-- [ ] 4.2 实现变量解析 (`src/variable/variable-resolver.ts`)
+- [x] 4.2 实现变量解析 (`src/variable/variable-resolver.ts`)
   - resolve_variables 主算法
   - resolve_scope_var: 作用域变量解析
   - scope_get_var → get_loc/get_arg/get_var_ref 转换
@@ -311,7 +324,7 @@
   - 参考 `docs/quickjs/bytecode-functions/resolve-variables.md`
   - **标注 C 源码**: `@source parser.c` 中的 resolve_variables, resolve_scope_var
 
-- [ ] 4.3 实现闭包变量处理 (`src/variable/closure-analyzer.ts`)
+- [x] 4.3 实现闭包变量处理 (`src/variable/closure-analyzer.ts`)
   - add_closure_var: 添加闭包变量
   - 闭包变量捕获检测（is_captured 标记）
   - 闭包变量链接（parent function → child function）
@@ -319,7 +332,7 @@
   - 参考 `docs/quickjs/bytecode-functions/closure-analysis.md`
   - **标注 C 源码**: `@source parser.c` 中的 add_closure_var, add_closure_variables
 
-- [ ] 4.4 变量解析器单元测试
+- [x] 4.4 变量解析器单元测试
   - 局部变量测试
   - 闭包测试
   - 全局变量测试
@@ -327,7 +340,7 @@
 
 ## 4a. Atom 管理模块
 
-- [ ] 4a.1 实现 Atom 表管理 (`src/atom/atom-table.ts`)
+- [x] 4a.1 实现 Atom 表管理 (`src/atom/atom-table.ts`)
   - AtomTable 类实现
   - 字符串内部化（string interning）
   - 哈希表存储和查找
@@ -337,7 +350,7 @@
   - 支持私有/符号 atom（JS_ATOM_TYPE_PRIVATE/JS_ATOM_TYPE_SYMBOL）
   - **标注 C 源码**: `@source quickjs.c` 中的 JSAtomStruct, atom_hash, __JS_NewAtom
 
-- [ ] 4a.2 实现 Atom 创建和查找 (`src/atom/atom-ops.ts`)
+- [x] 4a.2 实现 Atom 创建和查找 (`src/atom/atom-ops.ts`)
   - JS_NewAtom: 创建或获取 atom
   - JS_NewAtomLen: 从字符串长度创建
   - JS_AtomToString: atom 转字符串
@@ -345,25 +358,25 @@
   - tagged int atom（__JS_AtomIsTaggedInt/JS_NewAtomUInt32）支持
   - **标注 C 源码**: `@source quickjs.c` 中的 JS_NewAtom, JS_NewAtomLen 等函数
 
-- [ ] 4a.3 实现预定义 Atom 初始化 (`src/atom/predefined-atoms.ts`)
+- [x] 4a.3 实现预定义 Atom 初始化 (`src/atom/predefined-atoms.ts`)
   - 初始化 QuickJS 预定义原子表
   - JS_ATOM_NULL, JS_ATOM_undefined, JS_ATOM_length 等
   - 确保与 QuickJS 运行时完全对齐
   - **从 WASM 自动生成**: 通过 getEnv.ts 导出预定义原子列表
 
-- [ ] 4a.4 实现 Atom 序列化 (`src/atom/atom-serializer.ts`)
+- [x] 4a.4 实现 Atom 序列化 (`src/atom/atom-serializer.ts`)
   - Atom 到字节码序列化
   - 字节码中的 atom 引用编码
   - atom_index 写入和读取
   - **标注 C 源码**: `@source quickjs.c` 中的 bc_put_atom, bc_get_atom
 
-- [ ] 4a.5 实现 Atom 与变量名集成 (`src/atom/atom-variable.ts`)
+- [x] 4a.5 实现 Atom 与变量名集成 (`src/atom/atom-variable.ts`)
   - 变量名 → Atom 转换
   - 属性名 → Atom 转换
   - 函数名/类名 → Atom 转换
   - emit_atom 操作码发射
 
-- [ ] 4a.6 Atom 模块单元测试
+- [x] 4a.6 Atom 模块单元测试
   - Atom 创建和查找测试
   - 字符串内部化重复检测
   - 预定义 Atom 对齐验证
@@ -371,76 +384,76 @@
 
 ## 4b. 控制流环境模块 (BlockEnv)
 
-- [ ] 4b.1 实现 BlockEnv 结构 (`src/control-flow/block-env.ts`)
+- [x] 4b.1 实现 BlockEnv 结构 (`src/control-flow/block-env.ts`)
   - BlockEnv 链表结构
   - 支持 label_name, label_break, label_cont
   - drop_count 栈元素计数
   - label_finally 支持 try-finally
   - **标注 C 源码**: `@source parser.h` 中的 BlockEnv 结构体
 
-- [ ] 4b.2 实现控制流环境管理 (`src/control-flow/block-manager.ts`)
+- [x] 4b.2 实现控制流环境管理 (`src/control-flow/block-manager.ts`)
   - push_block_env, pop_block_env
   - 查找 break/continue 目标标签
   - 处理 finally 块跳转
   - **标注 C 源码**: 对应控制流环境管理函数
 
-- [ ] 4b.3 实现 with 语句作用域 (`src/control-flow/with-scope.ts`)
+- [x] 4b.3 实现 with 语句作用域 (`src/control-flow/with-scope.ts`)
   - has_with_scope 检测
   - get_with_scope_opcode 转换
   - **标注 C 源码**: `@source parser.c` 中的 with 相关函数
 
-- [ ] 4b.4 BlockEnv 模块单元测试
+- [x] 4b.4 BlockEnv 模块单元测试
   - break/continue 标签解析
   - try-finally 跳转测试
   - 嵌套块环境测试
 
 ## 4c. 全局变量模块
 
-- [ ] 4c.1 实现 JSGlobalVar 结构 (`src/variable/global-var.ts`)
+- [x] 4c.1 实现 JSGlobalVar 结构 (`src/variable/global-var.ts`)
   - JSGlobalVar 结构定义
   - force_init, is_lexical, is_const 标志
   - cpool_idx 函数提升索引
   - **标注 C 源码**: `@source parser.h` 中的 JSGlobalVar
 
-- [ ] 4c.2 实现全局变量管理 (`src/variable/global-var-manager.ts`)
+- [x] 4c.2 实现全局变量管理 (`src/variable/global-var-manager.ts`)
   - add_global_var
   - find_global_var
   - 全局变量定义检查（check_define_var）
   - **标注 C 源码**: 对应全局变量管理函数
 
-- [ ] 4c.3 实现 eval 变量处理 (`src/variable/eval-variables.ts`)
+- [x] 4c.3 实现 eval 变量处理 (`src/variable/eval-variables.ts`)
   - add_eval_variables
   - mark_eval_captured_variables
   - eval 闭包变量捕获
   - **标注 C 源码**: `@source parser.c` 中的 add_eval_variables
 
-- [ ] 4c.4 全局变量模块单元测试
+- [x] 4c.4 全局变量模块单元测试
   - 全局变量定义测试
   - eval 变量捕获测试
 
 ## 4d. 私有字段模块
 
-- [ ] 4d.1 实现私有字段解析 (`src/variable/private-field.ts`)
+- [x] 4d.1 实现私有字段解析 (`src/variable/private-field.ts`)
   - resolve_scope_private_field
   - 私有字段查找和验证
   - 私有方法/访问器处理
   - **标注 C 源码**: `@source parser.c` 中的 resolve_scope_private_field
 
-- [ ] 4d.2 实现私有字段发射 (`src/emitter/private-field.ts`)
+- [x] 4d.2 实现私有字段发射 (`src/emitter/private-field.ts`)
   - OP_get_private_field
   - OP_put_private_field
   - OP_define_private_field
   - OP_scope_in_private_field
   - **标注 C 源码**: 对应私有字段操作码发射
 
-- [ ] 4d.3 私有字段模块单元测试
+- [x] 4d.3 私有字段模块单元测试
   - 私有字段访问测试
   - 私有方法测试
   - 私有 getter/setter 测试
 
 ## 5. 标签模块 - Phase 3
 
-- [ ] 5.1 实现标签管理 (`src/label/label-manager.ts`)
+- [x] 5.1 实现标签管理 (`src/label/label-manager.ts`)
   - new_label, emit_label, emit_goto
   - emit_label_raw（不更新 last opcode）
   - update_label/get_label_pos
@@ -448,7 +461,7 @@
   - 标签位置记录（pos, pos2, addr 三阶段）
   - **标注 C 源码**: `@source parser.c` 中的 new_label, emit_label 等
 
-- [ ] 5.2 实现标签解析 (`src/label/label-resolver.ts`)
+- [x] 5.2 实现标签解析 (`src/label/label-resolver.ts`)
   - resolve_labels 主算法
   - 跳转偏移计算和回填
   - goto 指令重定位
@@ -456,34 +469,34 @@
   - 参考 `docs/quickjs/bytecode-functions/resolve-labels.md`
   - **标注 C 源码**: `@source parser.c` 中的 resolve_labels 函数
 
-- [ ] 5.3 实现临时操作码移除
+- [x] 5.3 实现临时操作码移除
   - OP_label/OP_line_num 临时操作码处理
   - OP_enter_scope, OP_leave_scope 移除
   - OP_set_class_name 移除
   - 作用域相关指令处理
 
-- [ ] 5.4 实现栈大小计算 (`src/label/stack-size.ts`)
+- [x] 5.4 实现栈大小计算 (`src/label/stack-size.ts`)
   - compute_stack_size 算法
   - 模拟执行计算最大栈深度
   - 栈溢出检测
   - 使用 opcode_info/short_opcode_info 的 n_pop/n_push
   - **标注 C 源码**: `@source parser.c` 中的 compute_stack_size
 
-- [ ] 5.5 标签模块单元测试
+- [x] 5.5 标签模块单元测试
   - 跳转偏移验证
   - 标签引用验证
   - 栈大小计算验证
 
 ## 5a. 字节码优化模块
 
-- [ ] 5a.1 实现窥孔优化 (`src/optimizer/peephole.ts`)
+- [x] 5a.1 实现窥孔优化 (`src/optimizer/peephole.ts`)
   - 冗余操作消除（drop before return_undef）
   - 连续跳转优化（goto chain optimization）
   - 尾调用转换（call + return → tail_call）
   - CodeContext + code_match 辅助匹配
   - **标注 C 源码**: `@source parser.c` 中的优化相关代码
 
-- [ ] 5a.2 实现短操作码转换 (`src/optimizer/short-opcodes.ts`)
+- [x] 5a.2 实现短操作码转换 (`src/optimizer/short-opcodes.ts`)
   - push_i32 → push_0/push_1/push_2/push_minus_one 等
   - get_loc → get_loc0/get_loc1/get_loc2/get_loc3
   - put_loc → put_loc0/put_loc1/put_loc2/put_loc3
@@ -496,62 +509,62 @@
   - put_short_code 函数实现
   - **标注 C 源码**: 对应 put_short_code 和短操作码转换逻辑
 
-- [ ] 5a.3 实现死代码消除 (`src/optimizer/dead-code.ts`)
+- [x] 5a.3 实现死代码消除 (`src/optimizer/dead-code.ts`)
   - skip_dead_code 实现
   - 不可达代码检测（return/throw/goto 后）
   - 死代码标签引用更新
   - **标注 C 源码**: `@source parser.c` 中的 skip_dead_code
 
-- [ ] 5a.4 优化模块单元测试
+- [x] 5a.4 优化模块单元测试
   - 优化效果验证
   - 优化前后字节码对比
   - 短操作码转换验证
 
 ## 5b. Inline Cache (IC) 模块
 
-- [ ] 5b.1 实现 InlineCache 结构 (`src/ic/inline-cache.ts`)
+- [x] 5b.1 实现 InlineCache 结构 (`src/ic/inline-cache.ts`)
   - InlineCache 类实现
   - InlineCacheRingSlot 环形缓存槽
   - InlineCacheHashSlot 哈希索引
   - **标注 C 源码**: `@source ic.h/ic.cpp` 中的 InlineCache 结构
 
-- [ ] 5b.2 实现 IC 操作函数 (`src/ic/ic-ops.ts`)
+- [x] 5b.2 实现 IC 操作函数 (`src/ic/ic-ops.ts`)
   - init_ic: 初始化内联缓存
   - add_ic_slot1: 添加缓存槽
   - rebuild_ic: 重建缓存
   - free_ic: 释放缓存
   - **标注 C 源码**: `@source ic.cpp` 中的 IC 函数
 
-- [ ] 5b.3 实现 emit_ic 发射 (`src/emitter/ic-emitter.ts`)
+- [x] 5b.3 实现 emit_ic 发射 (`src/emitter/ic-emitter.ts`)
   - emit_ic 在属性访问时记录 atom
   - IC 索引写入字节码
   - **标注 C 源码**: `@source parser.c` 中的 emit_ic
 
-- [ ] 5b.4 IC 模块单元测试
+- [x] 5b.4 IC 模块单元测试
   - IC 初始化测试
   - 属性访问 IC 记录测试
 
 ## 6. 调试信息模块
 
-- [ ] 6.1 实现 PC 到行号映射 (`src/debug/pc2line.ts`)
+- [x] 6.1 实现 PC 到行号映射 (`src/debug/pc2line.ts`)
   - add_pc2line_info 记录映射
   - pc2line 压缩编码（差分编码）
   - 字节码位置到源码行号的映射
   - **标注 C 源码**: `@source parser.c` 中的 add_pc2line_info
 
-- [ ] 6.2 实现 PC 到列号映射 (`src/debug/pc2column.ts`)
+- [x] 6.2 实现 PC 到列号映射 (`src/debug/pc2column.ts`)
   - add_pc2column_info 记录映射
   - pc2column 压缩编码
   - 字节码位置到源码列号的映射
   - **标注 C 源码**: `@source parser.c` 中的 pc2column 相关函数
 
-- [ ] 6.3 实现源码映射生成 (`src/debug/source-map.ts`)
+- [x] 6.3 实现源码映射生成 (`src/debug/source-map.ts`)
   - source_pos 记录（相对于 buf_start 的偏移）
   - LineNumberSlot/ColumnNumberSlot 结构
   - line_number_slots 和 column_number_slots 管理
   - **标注 C 源码**: `@source parser.h` 中的 LineNumberSlot
 
-- [ ] 6.4 实现字节码转储 (`src/debug/bytecode-dump.ts`)
+- [x] 6.4 实现字节码转储 (`src/debug/bytecode-dump.ts`)
   - dump_byte_code 实现
   - 操作码反汇编
   - 常量池显示
@@ -560,14 +573,14 @@
   - 支持 DUMP_BYTECODE 环境变量
   - **标注 C 源码**: `@source parser.c` 中的 dump_byte_code
 
-- [ ] 6.5 调试信息模块单元测试
+- [x] 6.5 调试信息模块单元测试
   - PC 到行号映射验证
   - PC 到列号映射验证
   - 字节码转储输出验证
 
 ## 6a. 序列化模块
 
-- [ ] 6a.1 实现字节码写入器 (`src/serializer/bytecode-writer.ts`)
+- [x] 6a.1 实现字节码写入器 (`src/serializer/bytecode-writer.ts`)
   - BCWriterState 状态管理
   - bc_put_u8, bc_put_u16, bc_put_u32, bc_put_u64
   - bc_put_leb128, bc_put_sleb128 变长编码
@@ -576,14 +589,14 @@
   - bc_byte_swap（端序转换）
   - **标注 C 源码**: `@source bytecode.cpp` 中的 bc_put_* 函数
 
-- [ ] 6a.2 实现 Atom 序列化 (`src/serializer/atom-writer.ts`)
+- [x] 6a.2 实现 Atom 序列化 (`src/serializer/atom-writer.ts`)
   - bc_atom_to_idx: atom 到索引映射
   - bc_put_atom: 写入 atom 引用
   - idx_to_atom 数组管理
   - JS_WriteObjectAtoms: 写入 atom 表
   - **标注 C 源码**: `@source bytecode.cpp` 中的 bc_atom_to_idx, bc_put_atom
 
-- [ ] 6a.3 实现函数字节码序列化 (`src/serializer/function-writer.ts`)
+- [x] 6a.3 实现函数字节码序列化 (`src/serializer/function-writer.ts`)
   - JS_WriteFunctionTag 实现
   - 函数头标志位编码（bc_set_flags）
   - vardefs 序列化
@@ -593,7 +606,7 @@
   - debug source 中的 IC atom 列表
   - **标注 C 源码**: `@source bytecode.cpp` 中的 JS_WriteFunctionTag
 
-- [ ] 6a.4 实现模块序列化 (`src/serializer/module-writer.ts`)
+- [x] 6a.4 实现模块序列化 (`src/serializer/module-writer.ts`)
   - JS_WriteModule 实现
   - req_module_entries 序列化
   - export_entries 序列化
@@ -601,7 +614,7 @@
   - import_entries 序列化
   - **标注 C 源码**: `@source bytecode.cpp` 中的 JS_WriteModule
 
-- [ ] 6a.5 实现值序列化 (`src/serializer/value-writer.ts`)
+- [x] 6a.5 实现值序列化 (`src/serializer/value-writer.ts`)
   - JS_WriteObjectRec: 递归值序列化
   - BC_TAG_* 标签处理
   - JS_WriteString: 字符串序列化
@@ -611,47 +624,47 @@
   - object_list 循环引用处理（allow_reference）
   - **标注 C 源码**: `@source bytecode.cpp` 中的 JS_WriteObjectRec
 
-- [ ] 6a.6 实现字节码反序列化 (`src/serializer/bytecode-reader.ts`)
+- [x] 6a.6 实现字节码反序列化 (`src/serializer/bytecode-reader.ts`)
   - BCReaderState 状态管理
   - bc_get_u8, bc_get_u16, bc_get_u32, bc_get_u64
   - bc_get_leb128, bc_get_sleb128
   - bc_get_atom: 读取 atom 引用
   - **标注 C 源码**: `@source bytecode.cpp` 中的 bc_get_* 函数
 
-- [ ] 6a.7 实现值反序列化 (`src/serializer/value-reader.ts`)
+- [x] 6a.7 实现值反序列化 (`src/serializer/value-reader.ts`)
   - JS_ReadObjectRec: 递归值反序列化
   - BC_TAG_* 标签解码
   - JS_ReadString/JS_ReadBigInt
   - JS_ReadArray/JS_ReadObjectTag
   - **标注 C 源码**: `@source bytecode.cpp` 中的 JS_ReadObjectRec
 
-- [ ] 6a.8 实现模块反序列化 (`src/serializer/module-reader.ts`)
+- [x] 6a.8 实现模块反序列化 (`src/serializer/module-reader.ts`)
   - JS_ReadModule 实现
   - req_module_entries/export_entries/import_entries 反序列化
   - **标注 C 源码**: `@source bytecode.cpp` 中的 JS_ReadModule
 
-- [ ] 6a.9 实现函数字节码反序列化 (`src/serializer/function-reader.ts`)
+- [x] 6a.9 实现函数字节码反序列化 (`src/serializer/function-reader.ts`)
   - JS_ReadFunctionTag 实现
   - 函数头解码
   - vardefs, closure_var 反序列化
   - 字节码和调试信息反序列化
   - **标注 C 源码**: `@source bytecode.cpp` 中的 JS_ReadFunctionTag
 
-- [ ] 6a.10 序列化模块单元测试
+- [x] 6a.10 序列化模块单元测试
   - 写入/读取往返测试
   - 格式正确性验证
   - 与 QuickJS 格式完全对比
 
 ## 7. 编译器集成
 
-- [ ] 7.1 实现编译器入口 (`src/compiler.ts`)
+- [x] 7.1 实现编译器入口 (`src/compiler.ts`)
   - compile 函数
   - 编译选项处理（严格模式、模块模式等）
   - strip_debug/strip_source 选项支持
   - 错误收集和报告
   - **标注 C 源码**: 对应 __JS_EvalInternal
 
-- [ ] 7.2 实现 js_create_function (`src/compiler/create-function.ts`)
+- [x] 7.2 实现 js_create_function (`src/compiler/create-function.ts`)
   - js_create_function 主函数
   - 编译 Pass 1: 解析和发射
   - 编译 Pass 2: resolve_variables
@@ -660,20 +673,20 @@
   - JSFunctionBytecode 创建
   - **标注 C 源码**: `@source parser.c` 中的 js_create_function
 
-- [ ] 7.3 实现命令行接口 (`src/cli.ts`)
+- [x] 7.3 实现命令行接口 (`src/cli.ts`)
   - 文件编译命令
   - 输出选项（.qjsc 格式）
   - 调试选项（DUMP_BYTECODE）
   - strip 选项
 
-- [ ] 7.4 更新 package.json
+- [x] 7.4 更新 package.json
   - 添加编译脚本
   - 添加测试脚本
   - 添加 typescript 依赖
 
 ## 7a. 模块编译模块
 
-- [ ] 7a.1 实现模块解析 (`src/module/module-parser.ts`)
+- [x] 7a.1 实现模块解析 (`src/module/module-parser.ts`)
   - js_parse_import 实现
   - js_parse_export 实现
   - js_parse_source_element（模块顶层元素）
@@ -681,13 +694,13 @@
   - import attributes 解析与存储
   - **标注 C 源码**: `@source parser.c` 中的 js_parse_import/export
 
-- [ ] 7a.2 实现模块变量处理 (`src/module/module-variables.ts`)
+- [x] 7a.2 实现模块变量处理 (`src/module/module-variables.ts`)
   - add_module_variables
   - 模块闭包变量添加
   - 导出变量解析
   - **标注 C 源码**: `@source parser.c` 中的 add_module_variables
 
-- [ ] 7a.3 实现导入/导出条目 (`src/module/module-entries.ts`)
+- [x] 7a.3 实现导入/导出条目 (`src/module/module-entries.ts`)
   - JSImportEntry 结构
   - JSExportEntry 结构
   - JSReqModuleEntry 结构
@@ -696,34 +709,34 @@
   - add_export_entry2 函数
   - **标注 C 源码**: `@source parser.c` 中的 add_export_entry2
 
-- [ ] 7a.4 实现模块检测 (`src/module/module-detect.ts`)
+- [x] 7a.4 实现模块检测 (`src/module/module-detect.ts`)
   - JS_DetectModule 实现
   - 自动检测 import/export 语句
   - **标注 C 源码**: `@source parser.c` 中的 JS_DetectModule
 
-- [ ] 7a.5 模块编译单元测试
+- [x] 7a.5 模块编译单元测试
   - 导入语句编译测试
   - 导出语句编译测试
   - 模块变量解析测试
 
 ## 8. QuickJS WASM 源码调试支持
 
-- [ ] 8.1 更新 buildWasm.ts 添加 DWARF 调试支持
+- [x] 8.1 更新 buildWasm.ts 添加 DWARF 调试支持
   - 添加 `-g` 编译标志支持
   - 添加 `--debug-dwarf` 命令行选项
   - Debug 构建默认启用调试信息
 
-- [ ] 8.2 实现分离调试信息
+- [x] 8.2 实现分离调试信息
   - 添加 `--separate-dwarf` 选项
   - 生成 `.debug.wasm` 文件
   - 配置 `SEPARATE_DWARF_URL` 指向本地文件
 
-- [ ] 8.3 更新 CMakeLists.txt
+- [x] 8.3 更新 CMakeLists.txt
   - 添加 DWARF 相关编译选项
   - 支持 Debug/Release 不同配置
   - 处理 `-fno-inline` 优化标志
 
-- [ ] 8.4 Chrome DevTools 集成验证
+- [x] 8.4 Chrome DevTools 集成验证
   - 验证源码断点功能
   - 验证变量查看功能
   - 验证调用栈追踪
@@ -731,28 +744,28 @@
 
 ## 9. 字节码运行支持
 
-- [ ] 9.1 实现字节码运行接口 (`src/runtime/runner.ts`)
+- [x] 9.1 实现字节码运行接口 (`src/runtime/runner.ts`)
   - 加载 QuickJS WASM 模块
   - 执行编译后的字节码
   - 返回执行结果
   - 释放字节码 atom（free_bytecode_atoms 对齐）
 
-- [ ] 9.2 实现字节码对比验证 (`src/runtime/comparator.ts`)
+- [x] 9.2 实现字节码对比验证 (`src/runtime/comparator.ts`)
   - 比较 TS 编译器生成的字节码与 QuickJS WASM 编译器
   - **按字节完全对比**，非功能等价
   - 生成详细的差异报告（不匹配字节位置、十六进制对比）
 
-- [ ] 9.2a 实现运行时验证 (`src/runtime/execution-validator.ts`)
+- [x] 9.2a 实现运行时验证 (`src/runtime/execution-validator.ts`)
   - 使用 QuickJS WASM 运行时执行 TS 编译器生成的字节码
   - 对比 TS 字节码和 QuickJS 字节码的执行结果
   - 验证返回值、异常和副作用是否一致
 
-- [ ] 9.3 更新 scripts/QuickJSLib.ts
+- [x] 9.3 更新 scripts/QuickJSLib.ts
   - 添加字节码编译 API
   - 添加字节码执行 API
   - 添加字节码序列化/反序列化
 
-- [ ] 9.4 字节码运行单元测试
+- [x] 9.4 字节码运行单元测试
   - 简单表达式运行验证
   - 函数调用运行验证
   - 错误处理验证
@@ -760,23 +773,23 @@
 
 ## 10. 字节码对齐验证框架
 
-- [ ] 10.1 实现自动化对齐测试 (`src/test/alignment-test.ts`)
+- [x] 10.1 实现自动化对齐测试 (`src/test/alignment-test.ts`)
   - 遍历所有 fixtures 目录
   - 对每个 fixture 同时使用 TS 编译器和 QuickJS WASM 编译
   - 按字节对比两者输出的字节码
   - **运行两者生成的字节码并对比执行结果**
 
-- [ ] 10.2 实现差异报告生成器 (`src/test/diff-reporter.ts`)
+- [x] 10.2 实现差异报告生成器 (`src/test/diff-reporter.ts`)
   - 生成可读的字节码差异报告
   - 显示不匹配的字节位置和上下文
   - 支持 JSON 和文本格式输出
 
-- [ ] 10.3 实现 CI/CD 集成
+- [x] 10.3 实现 CI/CD 集成
   - 每次提交自动运行对齐测试
   - 任何字节码不匹配则构建失败
   - 生成测试覆盖率报告
 
-- [ ] 10.4 实现回归测试机制
+- [x] 10.4 实现回归测试机制
   - 保存已通过的 fixture 字节码快照
   - 检测新修改是否破坏已有功能
   - 支持批量更新快照（当 QuickJS 版本升级时）
@@ -787,45 +800,45 @@
   - 各模块测试覆盖率 > 80%
   - 边界情况覆盖
 
-- [ ] 11.2 Fixtures 集成测试
+- [x] 11.2 Fixtures 集成测试
   - 编译 fixtures/basic/ 所有文件
   - 编译 fixtures/es2020/ 所有文件
   - 验证编译成功率
 
-- [ ] 11.3 QuickJS WASM 字节码对齐测试
+- [x] 11.3 QuickJS WASM 字节码对齐测试
   - 运行自动化对齐测试框架
   - 所有 fixtures 必须完全对齐
   - 生成对齐测试报告
   - **执行结果验证报告**（TS 字节码运行结果 vs QuickJS 字节码运行结果）
 
-- [ ] 11.4 性能测试
+- [x] 11.4 性能测试
   - 编译时间基准
   - 内存使用监控
   - 大文件测试
 
 ## 12. 文档和清理
 
-- [ ] 12.1 API 文档
+- [x] 12.1 API 文档
   - 编译器 API 文档
   - 类型定义文档
   - 使用示例
 
-- [ ] 12.2 WASM 调试文档
+- [x] 12.2 WASM 调试文档
   - Chrome DevTools 调试指南
   - DWARF 调试信息说明
   - 常见问题解答
 
-- [ ] 12.3 字节码对齐验证文档
+- [x] 12.3 字节码对齐验证文档
   - 验证机制说明
   - 如何添加新 fixture
   - 故障排除指南
 
-- [ ] 12.4 架构文档
+- [x] 12.4 架构文档
   - 模块关系图
   - 数据流图
   - 扩展指南
 
-- [ ] 12.5 代码清理
+- [x] 12.5 代码清理
   - 删除调试代码
   - 统一代码风格
   - 添加必要注释
