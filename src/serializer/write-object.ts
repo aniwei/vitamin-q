@@ -1,14 +1,5 @@
 import { AtomTable } from '../atom/atom-table'
-import {
-  BytecodeTag,
-  FIRST_ATOM_ID,
-  FunctionKind,
-  JSMode,
-  JS_ATOM_NULL,
-  OpFormat,
-  OPCODE_BY_CODE,
-  TEMP_OPCODE_BY_CODE,
-} from '../env'
+import { BytecodeTag, FunctionKind, JSMode, JS_ATOM_NULL, OpFormat, OPCODE_BY_CODE, TEMP_OPCODE_BY_CODE, FIRST_ATOM_ID } from '../env'
 import type { JSAtom } from '../types/function-def'
 import type { JSValue, ConstantPool } from '../types/bytecode'
 import type { JSFunctionBytecodeView } from '../types/function-bytecode'
@@ -18,9 +9,9 @@ import { decodeOperand, encodeOperand } from '../types/operand-format'
 
 interface WriterState {
   atomTable: AtomTable
+  firstAtom: number
   atomToIndex: Map<JSAtom, number>
   indexToAtom: JSAtom[]
-  firstAtom: number
   allowReference: boolean
   allowSAB: boolean
   allowBytecode: boolean
@@ -55,16 +46,13 @@ type WriteObjectValue =
   | { kind: 'function'; view: JSFunctionBytecodeView; cpool: ConstantPool }
   | { kind: 'module'; view: ModuleParseResult; func: JSFunctionBytecodeView; cpool: ConstantPool }
 
-const JS_ATOM_TAG_INT = 1 << 31
-
-const isTaggedIntAtom = (atom: JSAtom): boolean => (atom & JS_ATOM_TAG_INT) !== 0
-const atomToUInt32 = (atom: JSAtom): number => atom & ~JS_ATOM_TAG_INT
-
 const createState = (options: BytecodeSerializeOptions): WriterState => ({
   atomTable: options.atomTable,
+  firstAtom: options.allowBytecode ?? true
+    ? FIRST_ATOM_ID
+    : 1,
   atomToIndex: new Map(),
   indexToAtom: [],
-  firstAtom: (options.allowBytecode ?? true) ? FIRST_ATOM_ID : 1,
   allowReference: options.allowReference ?? false,
   allowSAB: options.allowSAB ?? false,
   allowBytecode: options.allowBytecode ?? true,
@@ -72,22 +60,22 @@ const createState = (options: BytecodeSerializeOptions): WriterState => ({
 })
 
 const atomToIndex = (state: WriterState, atom: JSAtom): number => {
-  if (atom < state.firstAtom || isTaggedIntAtom(atom)) return atom
+  if (atom < state.firstAtom) return atom
   const existing = state.atomToIndex.get(atom)
   if (existing !== undefined) return existing
-  const mapped = state.firstAtom + state.indexToAtom.length
+  const idx = state.indexToAtom.length
   state.indexToAtom.push(atom)
-  state.atomToIndex.set(atom, mapped)
-  return mapped
+  state.atomToIndex.set(atom, idx)
+  return idx + state.firstAtom
+}
+
+const encodeAtomValue = (state: WriterState, atom: JSAtom): number => {
+  const mapped = atomToIndex(state, atom)
+  return mapped << 1
 }
 
 const writeAtom = (writer: { buf: number[] }, state: WriterState, atom: JSAtom) => {
-  if (isTaggedIntAtom(atom)) {
-    bcPutLeb128(writer, (atomToUInt32(atom) << 1) | 1)
-    return
-  }
-  const mapped = atomToIndex(state, atom)
-  bcPutLeb128(writer, mapped << 1)
+  bcPutLeb128(writer, encodeAtomValue(state, atom))
 }
 
 const getAtomName = (state: WriterState, atom: JSAtom): string => {
