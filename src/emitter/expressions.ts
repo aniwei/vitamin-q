@@ -105,10 +105,18 @@ export class ExpressionEmitter {
         return this.emitCallExpression(node, context)
       case ts.isTypeOfExpression(node):
         return this.emitTypeOfExpression(node, context)
+      case ts.isVoidExpression(node):
+        return this.emitVoidExpression(node, context)
+      case ts.isDeleteExpression(node):
+        return this.emitDeleteExpression(node, context)
       case ts.isAwaitExpression(node):
         return this.emitAwaitExpression(node, context)
       case ts.isAsExpression(node) || ts.isTypeAssertionExpression(node):
         return this.emitTypeCastExpression(node, context)
+      case ts.isNonNullExpression(node):
+        return this.emitNonNullExpression(node, context)
+      case ts.isTaggedTemplateExpression(node):
+        return this.emitTaggedTemplateExpression(node, context)
       case ts.isPrefixUnaryExpression(node):
         return this.emitPrefixUnaryExpression(node, context)
       case ts.isPostfixUnaryExpression(node):
@@ -464,6 +472,13 @@ export class ExpressionEmitter {
     this.emitExpression(node.expression, context)
     context.bytecode.emitOp(Opcode.OP_dup)
     const args = node.arguments ?? []
+    if (args.some(arg => ts.isSpreadElement(arg))) {
+      this.emitArgumentsArray(args, context)
+      context.bytecode.emitOp(Opcode.OP_perm3)
+      context.bytecode.emitOp(Opcode.OP_apply)
+      context.bytecode.emitU16(1)
+      return
+    }
     for (const arg of args) {
       this.emitExpression(arg, context)
     }
@@ -477,6 +492,7 @@ export class ExpressionEmitter {
    * @see js_parse_postfix_expr
    */
   private emitCallExpression(node: ts.CallExpression | ts.CallChain, context: EmitterContext) {
+    const hasSpread = node.arguments.some(arg => ts.isSpreadElement(arg))
     if (node.expression.kind === ts.SyntaxKind.ImportKeyword) {
       if (node.arguments.length !== 1) {
         throw new Error('dynamic import 仅支持单参数')
@@ -490,6 +506,12 @@ export class ExpressionEmitter {
 
     if (node.expression.kind === ts.SyntaxKind.SuperKeyword) {
       context.bytecode.emitOp(Opcode.OP_get_super)
+      if (hasSpread) {
+        this.emitArgumentsArray(node.arguments, context)
+        context.bytecode.emitOp(Opcode.OP_apply)
+        context.bytecode.emitU16(1)
+        return
+      }
       for (const arg of node.arguments) {
         this.emitExpression(arg, context)
       }
@@ -573,6 +595,13 @@ export class ExpressionEmitter {
         context.bytecode.emitOp(Opcode.OP_get_var_ref)
         context.bytecode.emitU16(binding.index)
         context.bytecode.emitOp(Opcode.OP_check_brand)
+        if (hasSpread) {
+          this.emitArgumentsArray(node.arguments, context)
+          context.bytecode.emitOp(Opcode.OP_perm3)
+          context.bytecode.emitOp(Opcode.OP_apply)
+          context.bytecode.emitU16(0)
+          return
+        }
         for (const arg of node.arguments) {
           this.emitExpression(arg, context)
         }
@@ -584,6 +613,13 @@ export class ExpressionEmitter {
         context.bytecode.emitOp(Opcode.OP_get_super)
         emitStringLiteral(context, node.expression.name.text)
         context.bytecode.emitOp(Opcode.OP_get_array_el)
+        if (hasSpread) {
+          this.emitArgumentsArray(node.arguments, context)
+          context.bytecode.emitOp(Opcode.OP_perm3)
+          context.bytecode.emitOp(Opcode.OP_apply)
+          context.bytecode.emitU16(0)
+          return
+        }
         for (const arg of node.arguments) {
           this.emitExpression(arg, context)
         }
@@ -595,6 +631,13 @@ export class ExpressionEmitter {
       const atom = context.getAtom(node.expression.name.text)
       context.bytecode.emitOp(Opcode.OP_get_field2)
       context.bytecode.emitAtom(atom)
+      if (hasSpread) {
+        this.emitArgumentsArray(node.arguments, context)
+        context.bytecode.emitOp(Opcode.OP_perm3)
+        context.bytecode.emitOp(Opcode.OP_apply)
+        context.bytecode.emitU16(0)
+        return
+      }
       for (const arg of node.arguments) {
         this.emitExpression(arg, context)
       }
@@ -608,6 +651,13 @@ export class ExpressionEmitter {
         context.bytecode.emitOp(Opcode.OP_get_super)
         this.emitExpression(node.expression.argumentExpression, context)
         context.bytecode.emitOp(Opcode.OP_get_array_el)
+        if (hasSpread) {
+          this.emitArgumentsArray(node.arguments, context)
+          context.bytecode.emitOp(Opcode.OP_perm3)
+          context.bytecode.emitOp(Opcode.OP_apply)
+          context.bytecode.emitU16(0)
+          return
+        }
         for (const arg of node.arguments) {
           this.emitExpression(arg, context)
         }
@@ -618,6 +668,13 @@ export class ExpressionEmitter {
       this.emitExpression(node.expression.expression, context)
       this.emitExpression(node.expression.argumentExpression, context)
       context.bytecode.emitOp(Opcode.OP_get_array_el2)
+      if (hasSpread) {
+        this.emitArgumentsArray(node.arguments, context)
+        context.bytecode.emitOp(Opcode.OP_perm3)
+        context.bytecode.emitOp(Opcode.OP_apply)
+        context.bytecode.emitU16(0)
+        return
+      }
       for (const arg of node.arguments) {
         this.emitExpression(arg, context)
       }
@@ -627,11 +684,67 @@ export class ExpressionEmitter {
     }
 
     this.emitExpression(node.expression, context)
+    if (hasSpread) {
+      this.emitArgumentsArray(node.arguments, context)
+      context.bytecode.emitOp(Opcode.OP_undefined)
+      context.bytecode.emitOp(Opcode.OP_swap)
+      context.bytecode.emitOp(Opcode.OP_apply)
+      context.bytecode.emitU16(0)
+      return
+    }
     for (const arg of node.arguments) {
       this.emitExpression(arg, context)
     }
     context.bytecode.emitOp(Opcode.OP_call)
     context.bytecode.emitU16(node.arguments.length)
+  }
+
+  private emitArgumentsArray(args: readonly ts.Expression[], context: EmitterContext) {
+    const hasSpread = args.some(arg => ts.isSpreadElement(arg))
+    if (!hasSpread) {
+      for (const arg of args) {
+        this.emitExpression(arg, context)
+      }
+      context.bytecode.emitOp(Opcode.OP_array_from)
+      context.bytecode.emitU16(args.length)
+      return
+    }
+
+    let prefixCount = 0
+    while (prefixCount < args.length) {
+      const arg = args[prefixCount]
+      if (ts.isSpreadElement(arg)) break
+      prefixCount += 1
+    }
+
+    if (prefixCount > 0) {
+      for (let i = 0; i < prefixCount; i += 1) {
+        this.emitExpression(args[i], context)
+      }
+      context.bytecode.emitOp(Opcode.OP_array_from)
+      context.bytecode.emitU16(prefixCount)
+    } else {
+      context.bytecode.emitOp(Opcode.OP_array_from)
+      context.bytecode.emitU16(0)
+    }
+
+    context.bytecode.emitOp(Opcode.OP_push_i32)
+    context.bytecode.emitU32(prefixCount)
+
+    for (let i = prefixCount; i < args.length; i += 1) {
+      const arg = args[i]
+      if (ts.isSpreadElement(arg)) {
+        this.emitExpression(arg.expression, context)
+        context.bytecode.emitOp(Opcode.OP_append)
+        continue
+      }
+
+      this.emitExpression(arg, context)
+      context.bytecode.emitOp(Opcode.OP_define_array_el)
+      context.bytecode.emitOp(Opcode.OP_inc)
+    }
+
+    context.bytecode.emitOp(Opcode.OP_drop)
   }
 
   /**
@@ -645,6 +758,52 @@ export class ExpressionEmitter {
       this.emitExpression(node.expression, context)
     }
     context.bytecode.emitOp(Opcode.OP_typeof)
+  }
+
+  /**
+   * @source QuickJS/src/core/parser.c:5602-5648
+   * @see js_parse_unary
+   */
+  private emitVoidExpression(node: ts.VoidExpression, context: EmitterContext) {
+    this.emitExpression(node.expression, context)
+    context.bytecode.emitOp(Opcode.OP_drop)
+    context.bytecode.emitOp(Opcode.OP_undefined)
+  }
+
+  /**
+   * @source QuickJS/src/core/parser.c:5602-5648
+   * @see js_parse_unary
+   */
+  private emitDeleteExpression(node: ts.DeleteExpression, context: EmitterContext) {
+    const target = node.expression
+    if (ts.isIdentifier(target)) {
+      const atom = context.getAtom(target.text)
+      context.bytecode.emitOp(Opcode.OP_delete_var)
+      context.bytecode.emitAtom(atom)
+      return
+    }
+
+    if (ts.isPropertyAccessExpression(target)) {
+      if (target.expression.kind === ts.SyntaxKind.SuperKeyword) {
+        throw new Error('delete super.* 暂不支持')
+      }
+      this.emitExpression(target.expression, context)
+      emitStringLiteral(context, target.name.text)
+      context.bytecode.emitOp(Opcode.OP_delete)
+      return
+    }
+
+    if (ts.isElementAccessExpression(target)) {
+      if (target.expression.kind === ts.SyntaxKind.SuperKeyword) {
+        throw new Error('delete super[] 暂不支持')
+      }
+      this.emitExpression(target.expression, context)
+      this.emitExpression(target.argumentExpression, context)
+      context.bytecode.emitOp(Opcode.OP_delete)
+      return
+    }
+
+    throw new Error(`未支持 delete 操作数: ${ts.SyntaxKind[target.kind]}`)
   }
 
   /**
@@ -664,11 +823,37 @@ export class ExpressionEmitter {
   }
 
   /**
+   * @note TS 非空断言不参与运行时语义。
+   */
+  private emitNonNullExpression(node: ts.NonNullExpression, context: EmitterContext) {
+    this.emitExpression(node.expression, context)
+  }
+
+  /**
+   * @note Tagged template 目前仅支持基础表达式透传。
+   */
+  private emitTaggedTemplateExpression(node: ts.TaggedTemplateExpression, context: EmitterContext) {
+    this.emitExpression(node.tag, context)
+    if (ts.isNoSubstitutionTemplateLiteral(node.template)) {
+      emitStringLiteral(context, node.template.text)
+      context.bytecode.emitOp(Opcode.OP_call)
+      context.bytecode.emitU16(1)
+      return
+    }
+    this.emitTemplateExpression(node.template, context)
+    context.bytecode.emitOp(Opcode.OP_call)
+    context.bytecode.emitU16(1)
+  }
+
+  /**
    * @source QuickJS/src/core/parser.c:5602-5648
    * @see js_parse_unary
    */
   private emitPrefixUnaryExpression(node: ts.PrefixUnaryExpression, context: EmitterContext) {
     switch (node.operator) {
+      case ts.SyntaxKind.PlusToken:
+        this.emitExpression(node.operand, context)
+        return
       case ts.SyntaxKind.PlusPlusToken:
         this.emitUpdateExpression(node.operand, context, true, true)
         return
@@ -985,6 +1170,8 @@ export class ExpressionEmitter {
         return Opcode.OP_or
       case ts.SyntaxKind.CaretToken:
         return Opcode.OP_xor
+      case ts.SyntaxKind.AsteriskAsteriskToken:
+        return Opcode.OP_pow
       default:
         return null
     }

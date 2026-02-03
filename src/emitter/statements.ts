@@ -17,21 +17,66 @@ export type StatementEmitterFn = (node: ts.Statement, context: EmitterContext) =
  * @see js_parse_statement_or_decl
  */
 export class StatementEmitter {
-  private loopStack: Array<{ breakLabel: number; continueLabel?: number }> = []
+  private loopStack: Array<{ breakLabel: number; continueLabel?: number; label?: string }> = []
+  private labelStack: Array<{ label: string; breakLabel: number; continueLabel?: number }> = []
+  private pendingLabel?: string
   private destructuringEmitter = new DestructuringEmitter()
   private functionEmitter = new FunctionEmitter()
   private classEmitter = new ClassEmitter()
 
   private pushLoop(breakLabel: number, continueLabel?: number) {
-    this.loopStack.push({ breakLabel, continueLabel })
+    const label = this.pendingLabel
+    this.pendingLabel = undefined
+    this.loopStack.push({ breakLabel, continueLabel, label })
+    if (label) {
+      this.labelStack.push({ label, breakLabel, continueLabel })
+    }
   }
 
   private popLoop() {
-    this.loopStack.pop()
+    const loop = this.loopStack.pop()
+    if (loop?.label) {
+      this.labelStack.pop()
+    }
   }
 
   private currentLoop() {
     return this.loopStack[this.loopStack.length - 1]
+  }
+
+  private findLabel(name: string) {
+    for (let i = this.labelStack.length - 1; i >= 0; i -= 1) {
+      const entry = this.labelStack[i]
+      if (entry.label === name) return entry
+    }
+    return undefined
+  }
+
+  emitLabeledStatement(node: ts.LabeledStatement, context: EmitterContext, emitStatement: StatementEmitterFn) {
+    context.emitSourcePos(node)
+    const label = node.label.text
+
+    if (
+      ts.isForStatement(node.statement) ||
+      ts.isForInStatement(node.statement) ||
+      ts.isForOfStatement(node.statement) ||
+      ts.isWhileStatement(node.statement) ||
+      ts.isDoStatement(node.statement) ||
+      ts.isSwitchStatement(node.statement)
+    ) {
+      this.pendingLabel = label
+      emitStatement(node.statement, context)
+      if (this.pendingLabel === label) {
+        this.pendingLabel = undefined
+      }
+      return
+    }
+
+    const endLabel = context.labels.newLabel()
+    this.labelStack.push({ label, breakLabel: endLabel })
+    emitStatement(node.statement, context)
+    this.labelStack.pop()
+    context.labels.emitLabel(endLabel)
   }
 
   /**
@@ -554,6 +599,14 @@ export class StatementEmitter {
    */
   emitBreakStatement(node: ts.BreakStatement, context: EmitterContext) {
     context.emitSourcePos(node)
+    if (node.label) {
+      const entry = this.findLabel(node.label.text)
+      if (!entry) {
+        throw new Error(`未知的 break 标签: ${node.label.text}`)
+      }
+      context.labels.emitGoto(Opcode.OP_goto, entry.breakLabel)
+      return
+    }
     const loop = this.currentLoop()
     if (!loop) {
       throw new Error('break 必须位于循环语句内部')
@@ -567,6 +620,14 @@ export class StatementEmitter {
    */
   emitContinueStatement(node: ts.ContinueStatement, context: EmitterContext) {
     context.emitSourcePos(node)
+    if (node.label) {
+      const entry = this.findLabel(node.label.text)
+      if (!entry || entry.continueLabel === undefined) {
+        throw new Error(`未知的 continue 标签: ${node.label.text}`)
+      }
+      context.labels.emitGoto(Opcode.OP_goto, entry.continueLabel)
+      return
+    }
     const loop = this.currentLoop()
     if (!loop || loop.continueLabel === undefined) {
       throw new Error('continue 必须位于循环语句内部')

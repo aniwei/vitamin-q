@@ -596,6 +596,14 @@ export class BytecodeCompiler {
       )
     })
 
+    this.dispatcher.registerStatement(ts.SyntaxKind.LabeledStatement, (node, context) => {
+      this.statementEmitter.emitLabeledStatement(
+        node as ts.LabeledStatement,
+        context,
+        (stmt, ctx) => this.dispatcher.dispatch(stmt, ctx),
+      )
+    })
+
     this.dispatcher.registerStatement(ts.SyntaxKind.BreakStatement, (node, context) => {
       this.statementEmitter.emitBreakStatement(node as ts.BreakStatement, context)
     })
@@ -616,6 +624,8 @@ export class BytecodeCompiler {
       ts.SyntaxKind.ThisKeyword,
       ts.SyntaxKind.Identifier,
       ts.SyntaxKind.TypeOfExpression,
+      ts.SyntaxKind.VoidExpression,
+      ts.SyntaxKind.DeleteExpression,
       ts.SyntaxKind.PrefixUnaryExpression,
       ts.SyntaxKind.PostfixUnaryExpression,
       ts.SyntaxKind.BinaryExpression,
@@ -624,9 +634,11 @@ export class BytecodeCompiler {
       ts.SyntaxKind.CallExpression,
       ts.SyntaxKind.NewExpression,
       ts.SyntaxKind.TemplateExpression,
+      ts.SyntaxKind.TaggedTemplateExpression,
       ts.SyntaxKind.ConditionalExpression,
       ts.SyntaxKind.MetaProperty,
       ts.SyntaxKind.AwaitExpression,
+      ts.SyntaxKind.NonNullExpression,
       ts.SyntaxKind.AsExpression,
       ts.SyntaxKind.TypeAssertionExpression,
       ts.SyntaxKind.ArrayLiteralExpression,
