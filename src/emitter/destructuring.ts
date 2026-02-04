@@ -83,8 +83,9 @@ export class DestructuringEmitter {
     emitExpression: ExpressionEmitterFn,
   ) {
     const { elements, rest } = this.splitObjectBinding(pattern)
-    const elementCount = elements.filter(Boolean).length
-    const useGetField2 = Boolean(rest || elementCount === 1)
+    const bindingElements = elements.filter(Boolean) as ts.BindingElement[]
+    const elementCount = bindingElements.length
+    const hasDefault = bindingElements.some(element => Boolean(element.initializer))
     const assignLabel = context.labels.newLabel()
     const getLabel = context.labels.newLabel()
     const endLabel = context.labels.newLabel()
@@ -101,28 +102,16 @@ export class DestructuringEmitter {
       context.bytecode.emitOp(Opcode.OP_swap)
     }
 
+    let elementIndex = 0
     for (const element of elements) {
       if (!element) continue
-      const { propAtom, targetAtom } = this.getObjectBindingAtoms(element, context)
-      if (rest) {
-        context.bytecode.emitOp(Opcode.OP_swap)
-        context.bytecode.emitOp(Opcode.OP_null)
-        context.bytecode.emitOp(Opcode.OP_define_field)
-        context.bytecode.emitAtom(propAtom)
-        context.bytecode.emitOp(Opcode.OP_swap)
-      }
-      if (useGetField2) {
-        context.bytecode.emitOp(Opcode.OP_get_field2)
-        context.bytecode.emitAtom(propAtom)
-      } else {
-        context.bytecode.emitOp(Opcode.OP_dup)
-        context.bytecode.emitOp(Opcode.OP_get_field)
-        context.bytecode.emitAtom(propAtom)
-      }
-      if (element.initializer) {
-        this.emitDefaultInitializer(element.initializer, context, emitExpression)
-      }
-      this.emitBindingInit(targetAtom, context)
+      this.emitObjectBindingElement(element, context, emitExpression, {
+        rest,
+        elementCount,
+        hasDefault,
+        elementIndex,
+      })
+      elementIndex += 1
     }
 
     if (rest) {
@@ -177,17 +166,16 @@ export class DestructuringEmitter {
         context.bytecode.emitOp(Opcode.OP_drop)
         continue
       }
-      if (!ts.isBindingElement(element) || !ts.isIdentifier(element.name)) {
-        throw new Error('数组解构仅支持简单标识符元素')
+      if (!ts.isBindingElement(element)) {
+        throw new Error('数组解构仅支持绑定元素')
       }
-      const atom = context.getAtom(element.name.text)
       context.bytecode.emitOp(Opcode.OP_for_of_next)
       context.bytecode.emitU8(0)
       context.bytecode.emitOp(Opcode.OP_drop)
       if (element.initializer) {
         this.emitDefaultInitializer(element.initializer, context, emitExpression)
       }
-      this.emitBindingInit(atom, context)
+      this.emitBindingTargetFromValue(element.name, context, emitExpression)
     }
 
     if (rest) {
@@ -215,36 +203,25 @@ export class DestructuringEmitter {
     emitExpression: ExpressionEmitterFn,
   ) {
     const { elements, rest } = this.splitObjectBinding(pattern)
-    const elementCount = elements.filter(Boolean).length
-    const useGetField2 = Boolean(rest || elementCount === 1)
+    const bindingElements = elements.filter(Boolean) as ts.BindingElement[]
+    const elementCount = bindingElements.length
+    const hasDefault = bindingElements.some(element => Boolean(element.initializer))
     context.bytecode.emitOp(Opcode.OP_to_object)
     if (rest) {
       context.bytecode.emitOp(Opcode.OP_object)
       context.bytecode.emitOp(Opcode.OP_swap)
     }
 
+    let elementIndex = 0
     for (const element of elements) {
       if (!element) continue
-      const { propAtom, targetAtom } = this.getObjectBindingAtoms(element, context)
-      if (rest) {
-        context.bytecode.emitOp(Opcode.OP_swap)
-        context.bytecode.emitOp(Opcode.OP_null)
-        context.bytecode.emitOp(Opcode.OP_define_field)
-        context.bytecode.emitAtom(propAtom)
-        context.bytecode.emitOp(Opcode.OP_swap)
-      }
-      if (useGetField2) {
-        context.bytecode.emitOp(Opcode.OP_get_field2)
-        context.bytecode.emitAtom(propAtom)
-      } else {
-        context.bytecode.emitOp(Opcode.OP_dup)
-        context.bytecode.emitOp(Opcode.OP_get_field)
-        context.bytecode.emitAtom(propAtom)
-      }
-      if (element.initializer) {
-        this.emitDefaultInitializer(element.initializer, context, emitExpression)
-      }
-      this.emitBindingInit(targetAtom, context)
+      this.emitObjectBindingElement(element, context, emitExpression, {
+        rest,
+        elementCount,
+        hasDefault,
+        elementIndex,
+      })
+      elementIndex += 1
     }
 
     if (rest) {
@@ -280,17 +257,16 @@ export class DestructuringEmitter {
         context.bytecode.emitOp(Opcode.OP_drop)
         continue
       }
-      if (!ts.isBindingElement(element) || !ts.isIdentifier(element.name)) {
-        throw new Error('数组解构仅支持简单标识符元素')
+      if (!ts.isBindingElement(element)) {
+        throw new Error('数组解构仅支持绑定元素')
       }
-      const atom = context.getAtom(element.name.text)
       context.bytecode.emitOp(Opcode.OP_for_of_next)
       context.bytecode.emitU8(0)
       context.bytecode.emitOp(Opcode.OP_drop)
       if (element.initializer) {
         this.emitDefaultInitializer(element.initializer, context, emitExpression)
       }
-      this.emitBindingInit(atom, context)
+      this.emitBindingTargetFromValue(element.name, context, emitExpression)
     }
 
     if (rest) {
@@ -395,14 +371,34 @@ export class DestructuringEmitter {
     context.bytecode.emitOp(Opcode.OP_to_object)
 
     for (const prop of pattern.properties) {
-      const { propAtom, targetAtom } = this.getObjectLiteralAtoms(prop, context)
+      const entry = this.getObjectAssignmentEntry(prop)
+      const isTargetPropertyAccess = ts.isPropertyAccessExpression(entry.target)
+        && !ts.isPrivateIdentifier(entry.target.name)
+
+      if (isTargetPropertyAccess && !entry.isComputed) {
+        const propAtom = this.getObjectPropertyAtom(entry.propName, context)
+        const targetAtom = context.getAtom(entry.target.name.text)
+        context.bytecode.emitOp(Opcode.OP_dup)
+        emitExpression(entry.target.expression, context)
+        context.bytecode.emitOp(Opcode.OP_swap)
+        context.bytecode.emitOp(Opcode.OP_get_field)
+        context.bytecode.emitAtom(propAtom)
+        context.bytecode.emitOp(Opcode.OP_put_field)
+        context.bytecode.emitAtom(targetAtom)
+        continue
+      }
+
       context.bytecode.emitOp(Opcode.OP_dup)
-      context.bytecode.emitOp(Opcode.OP_make_var_ref)
-      context.bytecode.emitAtom(targetAtom)
-      context.bytecode.emitOp(Opcode.OP_rot3l)
-      context.bytecode.emitOp(Opcode.OP_get_field)
-      context.bytecode.emitAtom(propAtom)
-      context.bytecode.emitOp(Opcode.OP_put_ref_value)
+      if (entry.isComputed) {
+        emitExpression(entry.propName.expression, context)
+        context.bytecode.emitOp(Opcode.OP_to_propkey)
+        context.bytecode.emitOp(Opcode.OP_get_array_el)
+      } else {
+        const propAtom = this.getObjectPropertyAtom(entry.propName, context)
+        context.bytecode.emitOp(Opcode.OP_get_field)
+        context.bytecode.emitAtom(propAtom)
+      }
+      this.emitAssignmentTargetFromValue(entry.target, context, emitExpression)
     }
 
     context.bytecode.emitOp(Opcode.OP_drop)
@@ -455,6 +451,135 @@ export class DestructuringEmitter {
     context.labels.emitGoto(Opcode.OP_goto, assignLabel)
 
     context.labels.emitLabel(endLabel)
+  }
+
+  private emitObjectBindingElement(
+    element: ts.BindingElement,
+    context: EmitterContext,
+    emitExpression: ExpressionEmitterFn,
+    options: {
+      rest?: ts.BindingElement
+      elementCount: number
+      hasDefault: boolean
+      elementIndex: number
+    },
+  ) {
+    const { rest, elementCount, hasDefault, elementIndex } = options
+    const propName = element.propertyName
+      ?? (ts.isIdentifier(element.name) ? element.name : undefined)
+    if (!propName) {
+      throw new Error('对象解构仅支持具名属性')
+    }
+
+    const isComputed = ts.isComputedPropertyName(propName)
+    if (rest && isComputed) {
+      throw new Error('对象解构 rest 暂不支持计算属性名')
+    }
+
+    const propAtom = isComputed ? undefined : this.getObjectPropertyAtom(propName, context)
+    if (rest && propAtom !== undefined) {
+      context.bytecode.emitOp(Opcode.OP_swap)
+      context.bytecode.emitOp(Opcode.OP_null)
+      context.bytecode.emitOp(Opcode.OP_define_field)
+      context.bytecode.emitAtom(propAtom)
+      context.bytecode.emitOp(Opcode.OP_swap)
+    }
+
+    if (isComputed) {
+      emitExpression(propName.expression, context)
+      context.bytecode.emitOp(Opcode.OP_to_propkey)
+      context.bytecode.emitOp(Opcode.OP_dup1)
+      context.bytecode.emitOp(Opcode.OP_get_array_el)
+    } else {
+      const useGetField2 = element.propertyName === undefined
+        || ts.isObjectBindingPattern(element.name)
+        || ts.isArrayBindingPattern(element.name)
+      if (useGetField2) {
+        context.bytecode.emitOp(Opcode.OP_get_field2)
+        context.bytecode.emitAtom(propAtom)
+      } else {
+        context.bytecode.emitOp(Opcode.OP_dup)
+        context.bytecode.emitOp(Opcode.OP_get_field)
+        context.bytecode.emitAtom(propAtom)
+      }
+    }
+
+    if (element.initializer) {
+      this.emitDefaultInitializer(element.initializer, context, emitExpression)
+    }
+
+    this.emitBindingTargetFromValue(element.name, context, emitExpression)
+  }
+
+  private emitBindingTargetFromValue(
+    target: ts.BindingName,
+    context: EmitterContext,
+    emitExpression: ExpressionEmitterFn,
+  ) {
+    if (ts.isIdentifier(target)) {
+      this.emitBindingInit(context.getAtom(target.text), context)
+      return
+    }
+    if (ts.isObjectBindingPattern(target) || ts.isArrayBindingPattern(target)) {
+      this.emitBindingPatternFromValue(target, context, emitExpression)
+      return
+    }
+    throw new Error('未支持的解构目标')
+  }
+
+  private emitAssignmentTargetFromValue(
+    target: ts.Expression,
+    context: EmitterContext,
+    emitExpression: ExpressionEmitterFn,
+  ) {
+    if (ts.isIdentifier(target)) {
+      context.bytecode.emitOp(Opcode.OP_make_var_ref)
+      context.bytecode.emitAtom(context.getAtom(target.text))
+      context.bytecode.emitOp(Opcode.OP_swap)
+      context.bytecode.emitOp(Opcode.OP_insert2)
+      context.bytecode.emitOp(Opcode.OP_put_ref_value)
+      context.bytecode.emitOp(Opcode.OP_drop)
+      return
+    }
+
+    if (ts.isPropertyAccessExpression(target) && !ts.isPrivateIdentifier(target.name)) {
+      emitExpression(target.expression, context)
+      context.bytecode.emitOp(Opcode.OP_swap)
+      context.bytecode.emitOp(Opcode.OP_insert2)
+      context.bytecode.emitOp(Opcode.OP_put_field)
+      context.bytecode.emitAtom(context.getAtom(target.name.text))
+      context.bytecode.emitOp(Opcode.OP_drop)
+      return
+    }
+
+    throw new Error('对象解构赋值仅支持标识符或属性访问目标')
+  }
+
+  private getObjectPropertyAtom(propName: ts.PropertyName, context: EmitterContext): number {
+    if (ts.isIdentifier(propName) || ts.isStringLiteral(propName) || ts.isNumericLiteral(propName)) {
+      return context.getAtom(propName.text)
+    }
+    throw new Error('对象解构仅支持标识符或字面量属性名')
+  }
+
+  private getObjectAssignmentEntry(
+    prop: ts.ObjectLiteralElementLike,
+  ): { propName: ts.PropertyName; target: ts.Expression; isComputed: boolean } {
+    if (ts.isPropertyAssignment(prop)) {
+      return {
+        propName: prop.name,
+        target: prop.initializer,
+        isComputed: ts.isComputedPropertyName(prop.name),
+      }
+    }
+    if (ts.isShorthandPropertyAssignment(prop)) {
+      return {
+        propName: prop.name,
+        target: prop.name,
+        isComputed: false,
+      }
+    }
+    throw new Error('对象解构赋值仅支持简单属性')
   }
 
   private emitBindingInit(atom: number, context: EmitterContext) {

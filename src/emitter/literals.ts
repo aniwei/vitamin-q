@@ -99,33 +99,48 @@ export class LiteralEmitter {
       return
     }
 
-    context.bytecode.emitOp(Opcode.OP_array_from)
-    context.bytecode.emitU16(0)
-    context.bytecode.emitOp(Opcode.OP_push_i32)
-    context.bytecode.emitU32(0)
+    let prefixCount = 0
+    while (prefixCount < elements.length) {
+      const element = elements[prefixCount]
+      if (element.kind === ts.SyntaxKind.OmittedExpression) {
+        break
+      }
+      prefixCount += 1
+    }
+
+    if (prefixCount > 0) {
+      for (let i = 0; i < prefixCount; i += 1) {
+        emitExpression(elements[i] as ts.Expression, context)
+      }
+      context.bytecode.emitOp(Opcode.OP_array_from)
+      context.bytecode.emitU16(prefixCount)
+    } else {
+      context.bytecode.emitOp(Opcode.OP_array_from)
+      context.bytecode.emitU16(0)
+    }
 
     let trailingHole = false
-    for (const element of elements) {
+    for (let i = prefixCount; i < elements.length; i += 1) {
+      const element = elements[i]
       if (element.kind === ts.SyntaxKind.OmittedExpression) {
         trailingHole = true
-        context.bytecode.emitOp(Opcode.OP_inc)
         continue
       }
 
       trailingHole = false
       emitExpression(element as ts.Expression, context)
-      context.bytecode.emitOp(Opcode.OP_define_array_el)
-      context.bytecode.emitOp(Opcode.OP_inc)
+      context.bytecode.emitOp(Opcode.OP_define_field)
+      context.bytecode.emitAtom(context.getAtom(String(i)))
     }
 
     if (trailingHole) {
       const lengthAtom = context.getAtom('length')
-      context.bytecode.emitOp(Opcode.OP_dup1)
+      context.bytecode.emitOp(Opcode.OP_dup)
+      context.bytecode.emitOp(Opcode.OP_push_i32)
+      context.bytecode.emitU32(elements.length)
       context.bytecode.emitOp(Opcode.OP_put_field)
       context.bytecode.emitAtom(lengthAtom)
       context.bytecode.emitIC(lengthAtom)
-    } else {
-      context.bytecode.emitOp(Opcode.OP_drop)
     }
   }
 
@@ -147,7 +162,6 @@ export class LiteralEmitter {
 
         if (isComputed) {
           emitExpression((prop.name as ts.ComputedPropertyName).expression, context)
-          context.bytecode.emitOp(Opcode.OP_to_propkey)
         }
 
         this.functionEmitter.emitFunctionClosure(prop, context)

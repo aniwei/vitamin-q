@@ -13,7 +13,7 @@ test('label: resolver replaces label indices', () => {
   const resolver = new LabelResolver()
   const resolved = resolver.resolve(buffer, [{ refCount: 0, pos: 10, pos2: -1, addr: -1, firstReloc: null }])
   assert.equal(resolved[0], Opcode.OP_goto)
-  assert.equal(resolved[1], 10)
+  assert.equal(resolved[1], 4)
 })
 
 test('label: strip temp opcodes', () => {

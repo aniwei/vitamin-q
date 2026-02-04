@@ -83,7 +83,8 @@ export class AsyncEmitter {
     context.labels.emitGoto(Opcode.OP_goto, loopLabel)
 
     context.labels.emitLabel(throwLabel)
-    context.bytecode.emitOp(Opcode.OP_push_2)
+    context.bytecode.emitOp(Opcode.OP_push_i32)
+    context.bytecode.emitU32(2)
     context.bytecode.emitOp(Opcode.OP_strict_eq)
     context.labels.emitGoto(Opcode.OP_if_true, returnLabel)
     context.bytecode.emitOp(Opcode.OP_await)

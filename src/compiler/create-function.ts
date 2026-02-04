@@ -1,7 +1,8 @@
 import ts from 'typescript'
 
 import { BytecodeCompiler } from '../emitter/emitter'
-import { LabelResolver, stripTempOpcodes } from '../label/label-resolver'
+import { LabelResolver } from '../label/label-resolver'
+import { resolveVariables } from '../label/resolve-variables'
 import { peepholeOptimize } from '../optimizer/peephole'
 import { convertShortOpcodes } from '../optimizer/short-opcodes'
 import { eliminateDeadCode } from '../optimizer/dead-code'
@@ -31,12 +32,12 @@ export const createFunction = (options: CreateFunctionOptions): JSFunctionByteco
 
   const state = compiler.compileWithState(options.sourceFile)
   const raw = state.bytecode.toUint8Array()
-  const resolved = new LabelResolver().resolve(raw, state.labels.getSlots())
-  const stripped = stripTempOpcodes(resolved)
+  const phase2 = resolveVariables(raw, state.labels.getSlots().length)
+  const resolved = new LabelResolver().resolve(phase2, state.labels.getSlots())
 
   const optimized = eliminateDeadCode(
     convertShortOpcodes(
-      peepholeOptimize(stripped),
+      peepholeOptimize(resolved),
     ),
   )
 

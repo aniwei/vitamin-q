@@ -278,7 +278,7 @@ export class StatementEmitter {
       context.labels.emitGoto(Opcode.OP_gosub, finallyLabel)
     }
 
-    context.bytecode.emitOp(Opcode.OP_nip)
+    context.bytecode.emitOp(Opcode.OP_drop)
     context.labels.emitGoto(Opcode.OP_goto, endLabel)
 
     context.labels.emitLabel(catchLabel)
@@ -290,13 +290,15 @@ export class StatementEmitter {
         const atom = context.getAtom(decl.name.text)
         context.bytecode.emitOp(Opcode.OP_put_var)
         context.bytecode.emitAtom(atom)
+      } else {
+        context.bytecode.emitOp(Opcode.OP_drop)
       }
       context.bytecode.emitOp(Opcode.OP_catch)
       context.bytecode.emitU32(innerCatchLabel)
       for (const stmt of node.catchClause.block.statements) {
         emitStatement(stmt, context)
       }
-      context.bytecode.emitOp(Opcode.OP_nip)
+      context.bytecode.emitOp(Opcode.OP_drop)
       if (hasFinally && finallyLabel >= 0) {
         context.labels.emitGoto(Opcode.OP_gosub, finallyLabel)
       }
@@ -483,6 +485,10 @@ export class StatementEmitter {
     context.bytecode.emitOp(Opcode.OP_to_object)
     context.bytecode.emitOp(Opcode.OP_put_loc)
     context.bytecode.emitU16(withIdx)
+
+    context.bytecode.emitOp(Opcode.OP_undefined)
+    context.bytecode.emitOp(Opcode.OP_put_loc)
+    context.bytecode.emitU16(0)
 
     emitStatement(node.statement, context)
     context.popScope()

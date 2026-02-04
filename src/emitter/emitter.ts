@@ -175,6 +175,7 @@ export class EmitterContext {
     this.inlineCache = options.inlineCache ?? new InlineCacheManager()
     this.constantPool = options.constantPool ?? new ConstantPoolManager()
     this.scopes = new ScopeManager()
+    this.scopes.addVar(JSAtom.JS_ATOM__ret_)
     this.atomTable = options.atomTable
     this.argMap = options.argMap ?? new Map()
     this.inFunction = options.inFunction ?? false
@@ -405,7 +406,15 @@ export class BytecodeCompiler {
   }
 
   compileStatements(statements: readonly ts.Statement[], context: EmitterContext) {
+    const hoisted = new Set<ts.Statement>()
     for (const stmt of statements) {
+      if (ts.isFunctionDeclaration(stmt)) {
+        this.dispatcher.dispatch(stmt, context)
+        hoisted.add(stmt)
+      }
+    }
+    for (const stmt of statements) {
+      if (hoisted.has(stmt)) continue
       this.dispatcher.dispatch(stmt, context)
     }
   }
@@ -427,9 +436,7 @@ export class BytecodeCompiler {
       if (needsScope) {
         context.pushScope()
       }
-      for (const stmt of block.statements) {
-        this.dispatcher.dispatch(stmt, context)
-      }
+      this.compileStatements(block.statements, context)
       if (needsScope) {
         context.popScope()
       }
@@ -611,6 +618,23 @@ export class BytecodeCompiler {
     this.dispatcher.registerStatement(ts.SyntaxKind.ContinueStatement, (node, context) => {
       this.statementEmitter.emitContinueStatement(node as ts.ContinueStatement, context)
     })
+
+    const noop = () => {
+      // 忽略仅类型声明或模块语法占位
+    }
+
+    this.dispatcher.registerStatement(ts.SyntaxKind.InterfaceDeclaration, noop)
+    this.dispatcher.registerDeclaration(ts.SyntaxKind.InterfaceDeclaration, noop)
+    this.dispatcher.registerStatement(ts.SyntaxKind.TypeAliasDeclaration, noop)
+    this.dispatcher.registerDeclaration(ts.SyntaxKind.TypeAliasDeclaration, noop)
+    this.dispatcher.registerStatement(ts.SyntaxKind.ExportDeclaration, noop)
+    this.dispatcher.registerDeclaration(ts.SyntaxKind.ExportDeclaration, noop)
+    this.dispatcher.registerStatement(ts.SyntaxKind.ExportAssignment, noop)
+    this.dispatcher.registerDeclaration(ts.SyntaxKind.ExportAssignment, noop)
+    this.dispatcher.registerStatement(ts.SyntaxKind.ImportDeclaration, noop)
+    this.dispatcher.registerDeclaration(ts.SyntaxKind.ImportDeclaration, noop)
+    this.dispatcher.registerStatement(ts.SyntaxKind.ImportEqualsDeclaration, noop)
+    this.dispatcher.registerDeclaration(ts.SyntaxKind.ImportEqualsDeclaration, noop)
 
     const expressionKinds: ts.SyntaxKind[] = [
       ts.SyntaxKind.ParenthesizedExpression,

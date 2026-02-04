@@ -33,10 +33,11 @@ interface ClassAccessorDef {
 }
 
 interface ClassFieldDef {
-  node: ts.PropertyDeclaration
+  node?: ts.PropertyDeclaration
   name: ts.PropertyName | ts.PrivateIdentifier
   isStatic: boolean
   isComputed: boolean
+  initializer?: ts.Expression
 }
 
 interface ClassStaticBlockDef {
@@ -50,6 +51,33 @@ interface PrivateBinding {
   kind: 'field' | 'method' | 'accessor'
   node?: ts.FunctionLikeDeclarationBase
 }
+
+type OrderedMember =
+  | {
+      type: 'public-method'
+      node: ts.MethodDeclaration
+      name: ts.PropertyName
+      isStatic: boolean
+      isComputed: boolean
+    }
+  | {
+      type: 'public-accessor'
+      node: ts.GetAccessorDeclaration | ts.SetAccessorDeclaration
+      name: ts.PropertyName
+      isStatic: boolean
+      isComputed: boolean
+      isSetter: boolean
+    }
+  | {
+      type: 'private-method'
+      binding: PrivateBinding
+      isComputed: boolean
+    }
+  | {
+      type: 'private-accessor'
+      binding: PrivateBinding
+      isComputed: boolean
+    }
 
 /**
  * 类发射器（最小实现：构造函数 + 普通方法）。
@@ -97,7 +125,7 @@ export class ClassEmitter {
     const classFieldsLoc = context.allocateTempLocal()
     const shouldCloseClassName = Boolean(className && this.classNameIsReferenced(node, className))
 
-    const { methods, accessors, fields, staticBlocks, privateBindings } = this.collectMembers(node)
+    const { methods, accessors, fields, staticBlocks, privateBindings, orderedMembers } = this.collectMembers(node)
     const computedInstanceFields = fields.filter(field => !field.isStatic && field.isComputed)
     const computedStaticFields = fields.filter(field => field.isStatic && field.isComputed)
 
@@ -195,7 +223,6 @@ export class ClassEmitter {
       context.bytecode.emitOp(Opcode.OP_to_propkey)
       context.bytecode.emitOp(Opcode.OP_put_loc)
       context.bytecode.emitU16(local)
-      context.bytecode.emitOp(Opcode.OP_swap)
     }
 
     for (const field of computedStaticFields) {
@@ -208,58 +235,64 @@ export class ClassEmitter {
       context.bytecode.emitOp(Opcode.OP_swap)
     }
 
-    for (const binding of privateBindings) {
-      if (binding.kind !== 'method' && binding.kind !== 'accessor') continue
-      if (!binding.node) continue
-      if (binding.isStatic) {
+    for (const member of orderedMembers) {
+      const isStatic = member.type === 'public-method'
+        ? member.isStatic
+        : member.type === 'public-accessor'
+          ? member.isStatic
+          : member.binding.isStatic
+      const isComputed = member.type === 'public-method'
+        ? member.isComputed
+        : member.type === 'public-accessor'
+          ? member.isComputed
+          : member.isComputed
+      if (isStatic) {
         context.bytecode.emitOp(Opcode.OP_swap)
       }
-      this.functionEmitter.emitFunctionClosure(binding.node, context, { privateBindings: privateBindingInfo })
-      context.bytecode.emitOp(Opcode.OP_set_home_object)
-      if (binding.kind === 'method') {
-        context.bytecode.emitOp(Opcode.OP_set_name)
-        context.bytecode.emitAtom(context.getAtom(binding.name))
+
+      if (isComputed) {
+        const name = member.type === 'public-method'
+          ? member.name
+          : member.type === 'public-accessor'
+            ? member.name
+            : (member.binding.node?.name as ts.PropertyName | undefined)
+        if (name) {
+          emitExpression(this.getComputedNameExpression(name), context)
+        }
+      }
+
+      if (member.type === 'private-method' || member.type === 'private-accessor') {
+        const binding = member.binding
+        if (!binding.node) continue
+        this.functionEmitter.emitFunctionClosure(binding.node, context, { privateBindings: privateBindingInfo })
+        context.bytecode.emitOp(Opcode.OP_set_home_object)
+        if (binding.kind === 'method') {
+          context.bytecode.emitOp(Opcode.OP_set_name)
+          context.bytecode.emitAtom(context.getAtom(binding.name))
+        }
         context.bytecode.emitOp(Opcode.OP_put_loc)
         context.bytecode.emitU16(binding.local)
+      } else if (member.type === 'public-method') {
+        this.functionEmitter.emitFunctionClosure(member.node, context, { privateBindings: privateBindingInfo })
+        if (member.isComputed) {
+          context.bytecode.emitOp(Opcode.OP_define_method_computed)
+        } else {
+          context.bytecode.emitOp(Opcode.OP_define_method)
+          context.bytecode.emitAtom(context.getAtom(this.getPropertyName(member.name)))
+        }
+        context.bytecode.emitU8(OP_DEFINE_METHOD_METHOD)
       } else {
-        context.bytecode.emitOp(Opcode.OP_put_loc)
-        context.bytecode.emitU16(binding.local)
+        this.functionEmitter.emitFunctionClosure(member.node, context, { privateBindings: privateBindingInfo })
+        if (member.isComputed) {
+          context.bytecode.emitOp(Opcode.OP_define_method_computed)
+        } else {
+          context.bytecode.emitOp(Opcode.OP_define_method)
+          context.bytecode.emitAtom(context.getAtom(this.getPropertyName(member.name)))
+        }
+        context.bytecode.emitU8(member.isSetter ? OP_DEFINE_METHOD_SETTER : OP_DEFINE_METHOD_GETTER)
       }
-      if (binding.isStatic) {
-        context.bytecode.emitOp(Opcode.OP_swap)
-      }
-    }
 
-    for (const method of methods) {
-      if (method.isStatic) {
-        context.bytecode.emitOp(Opcode.OP_swap)
-      }
-      this.functionEmitter.emitFunctionClosure(method.node, context, { privateBindings: privateBindingInfo })
-      if (method.isComputed) {
-        context.bytecode.emitOp(Opcode.OP_define_method_computed)
-      } else {
-        context.bytecode.emitOp(Opcode.OP_define_method)
-        context.bytecode.emitAtom(context.getAtom(this.getPropertyName(method.name)))
-      }
-      context.bytecode.emitU8(OP_DEFINE_METHOD_METHOD)
-      if (method.isStatic) {
-        context.bytecode.emitOp(Opcode.OP_swap)
-      }
-    }
-
-    for (const accessor of accessors) {
-      if (accessor.isStatic) {
-        context.bytecode.emitOp(Opcode.OP_swap)
-      }
-      this.functionEmitter.emitFunctionClosure(accessor.node, context, { privateBindings: privateBindingInfo })
-      if (accessor.isComputed) {
-        context.bytecode.emitOp(Opcode.OP_define_method_computed)
-      } else {
-        context.bytecode.emitOp(Opcode.OP_define_method)
-        context.bytecode.emitAtom(context.getAtom(this.getPropertyName(accessor.name)))
-      }
-      context.bytecode.emitU8(accessor.isSetter ? OP_DEFINE_METHOD_SETTER : OP_DEFINE_METHOD_GETTER)
-      if (accessor.isStatic) {
+      if (isStatic) {
         context.bytecode.emitOp(Opcode.OP_swap)
       }
     }
@@ -349,8 +382,6 @@ export class ClassEmitter {
     if (options.declarationName) {
       context.bytecode.emitOp(Opcode.OP_put_var_init)
       context.bytecode.emitAtom(context.getAtom(options.declarationName))
-    } else {
-      context.bytecode.emitOp(Opcode.OP_drop)
     }
   }
 
@@ -436,6 +467,9 @@ export class ClassEmitter {
     const fields: ClassFieldDef[] = []
     const staticBlocks: ClassStaticBlockDef[] = []
     const privateBindings: PrivateBinding[] = []
+    const parameterFields: ClassFieldDef[] = []
+    const fieldNames = new Set<string>()
+    const orderedMembers: OrderedMember[] = []
 
     for (const member of node.members) {
       if (ts.isConstructorDeclaration(member)) continue
@@ -447,15 +481,28 @@ export class ClassEmitter {
         const isStatic = Boolean(member.modifiers?.some(mod => mod.kind === ts.SyntaxKind.StaticKeyword))
         const isComputed = ts.isComputedPropertyName(member.name)
         if (ts.isPrivateIdentifier(member.name)) {
-          privateBindings.push({
+          const binding = {
             name: member.name.text,
             local: -1,
             isStatic,
             kind: 'method',
             node: member as ts.MethodDeclaration,
-          } as PrivateBinding & { node: ts.MethodDeclaration })
+          } as PrivateBinding & { node: ts.MethodDeclaration }
+          privateBindings.push(binding)
+          orderedMembers.push({
+            type: 'private-method',
+            binding,
+            isComputed,
+          })
         } else {
           methods.push({ node: member, name: member.name, isStatic, isComputed })
+          orderedMembers.push({
+            type: 'public-method',
+            node: member,
+            name: member.name,
+            isStatic,
+            isComputed,
+          })
         }
         continue
       }
@@ -464,15 +511,29 @@ export class ClassEmitter {
         const isComputed = ts.isComputedPropertyName(member.name)
         const isSetter = ts.isSetAccessorDeclaration(member)
         if (ts.isPrivateIdentifier(member.name)) {
-          privateBindings.push({
+          const binding = {
             name: member.name.text,
             local: -1,
             isStatic,
             kind: 'accessor',
             node: member,
-          } as PrivateBinding & { node: ts.GetAccessorDeclaration | ts.SetAccessorDeclaration })
+          } as PrivateBinding & { node: ts.GetAccessorDeclaration | ts.SetAccessorDeclaration }
+          privateBindings.push(binding)
+          orderedMembers.push({
+            type: 'private-accessor',
+            binding,
+            isComputed,
+          })
         } else {
           accessors.push({ node: member, name: member.name, isStatic, isComputed, isSetter })
+          orderedMembers.push({
+            type: 'public-accessor',
+            node: member,
+            name: member.name,
+            isStatic,
+            isComputed,
+            isSetter,
+          })
         }
         continue
       }
@@ -487,11 +548,40 @@ export class ClassEmitter {
             kind: 'field',
           })
         }
+        if (!isComputed && ts.isIdentifier(member.name)) {
+          fieldNames.add(`${isStatic ? 'static' : 'instance'}:${member.name.text}`)
+        }
         fields.push({ node: member, name: member.name, isStatic, isComputed })
       }
     }
 
-    return { methods, accessors, fields, staticBlocks, privateBindings }
+    const ctor = node.members.find(member => ts.isConstructorDeclaration(member))
+    if (ctor && ts.isConstructorDeclaration(ctor)) {
+      for (const param of ctor.parameters) {
+        const hasParamProp = Boolean(param.modifiers?.some(mod => (
+          mod.kind === ts.SyntaxKind.PrivateKeyword ||
+          mod.kind === ts.SyntaxKind.PublicKeyword ||
+          mod.kind === ts.SyntaxKind.ProtectedKeyword ||
+          mod.kind === ts.SyntaxKind.ReadonlyKeyword
+        )))
+        if (!hasParamProp || !ts.isIdentifier(param.name)) continue
+        const key = `instance:${param.name.text}`
+        if (fieldNames.has(key)) continue
+        fieldNames.add(key)
+        parameterFields.push({
+          name: param.name,
+          isStatic: false,
+          isComputed: false,
+          initializer: undefined,
+        })
+      }
+    }
+
+    if (parameterFields.length > 0) {
+      fields.unshift(...parameterFields)
+    }
+
+    return { methods, accessors, fields, staticBlocks, privateBindings, orderedMembers }
   }
 
 
@@ -530,13 +620,15 @@ export class ClassEmitter {
       ctorContext.bytecode.emitOp(Opcode.OP_return)
     } else {
       ctorContext.bytecode.emitOp(Opcode.OP_push_this)
-      ctorContext.bytecode.emitOp(Opcode.OP_put_loc0)
+      ctorContext.bytecode.emitOp(Opcode.OP_put_loc)
+      ctorContext.bytecode.emitU16(0)
       ctorContext.bytecode.emitOp(Opcode.OP_check_ctor)
       ctorContext.bytecode.emitOp(Opcode.OP_get_var_ref_check)
       ctorContext.bytecode.emitU16(0)
       ctorContext.bytecode.emitOp(Opcode.OP_dup)
       const label = ctorContext.labels.emitGoto(Opcode.OP_if_false, -1)
-      ctorContext.bytecode.emitOp(Opcode.OP_get_loc0)
+      ctorContext.bytecode.emitOp(Opcode.OP_get_loc)
+      ctorContext.bytecode.emitU16(0)
       ctorContext.bytecode.emitOp(Opcode.OP_swap)
       ctorContext.bytecode.emitOp(Opcode.OP_call_method)
       ctorContext.bytecode.emitU16(0)
@@ -595,7 +687,8 @@ export class ClassEmitter {
       ctorContext.bytecode.emitOp(Opcode.OP_check_ctor)
     } else {
       ctorContext.bytecode.emitOp(Opcode.OP_push_this)
-      ctorContext.bytecode.emitOp(Opcode.OP_put_loc0)
+      ctorContext.bytecode.emitOp(Opcode.OP_put_loc)
+      ctorContext.bytecode.emitU16(0)
       ctorContext.bytecode.emitOp(Opcode.OP_check_ctor)
     }
 
@@ -607,7 +700,8 @@ export class ClassEmitter {
       ctorContext.bytecode.emitOp(Opcode.OP_get_loc_check)
       ctorContext.bytecode.emitU16(2)
     } else {
-      ctorContext.bytecode.emitOp(Opcode.OP_get_loc0)
+      ctorContext.bytecode.emitOp(Opcode.OP_get_loc)
+      ctorContext.bytecode.emitU16(0)
     }
     ctorContext.bytecode.emitOp(Opcode.OP_swap)
     ctorContext.bytecode.emitOp(Opcode.OP_call_method)
@@ -667,19 +761,24 @@ export class ClassEmitter {
     if (!options.isStatic) {
       initContext.bytecode.emitOp(Opcode.OP_special_object)
       initContext.bytecode.emitU8(OPSpecialObjectEnum.OP_SPECIAL_OBJECT_HOME_OBJECT)
-      initContext.bytecode.emitOp(Opcode.OP_put_loc1)
+      initContext.bytecode.emitOp(Opcode.OP_put_loc)
+      initContext.bytecode.emitU16(1)
     }
 
     initContext.bytecode.emitOp(Opcode.OP_push_this)
-    initContext.bytecode.emitOp(Opcode.OP_put_loc0)
+    initContext.bytecode.emitOp(Opcode.OP_put_loc)
+    initContext.bytecode.emitU16(0)
 
     let brandAdded = false
     for (const field of fields) {
-      initContext.bytecode.emitOp(Opcode.OP_get_loc0)
+      initContext.bytecode.emitOp(Opcode.OP_get_loc)
+      initContext.bytecode.emitU16(0)
       if (ts.isPrivateIdentifier(field.name)) {
         if (!options.isStatic && !brandAdded) {
-          initContext.bytecode.emitOp(Opcode.OP_get_loc0)
-          initContext.bytecode.emitOp(Opcode.OP_get_loc1)
+          initContext.bytecode.emitOp(Opcode.OP_get_loc)
+          initContext.bytecode.emitU16(0)
+          initContext.bytecode.emitOp(Opcode.OP_get_loc)
+          initContext.bytecode.emitU16(1)
           initContext.bytecode.emitOp(Opcode.OP_add_brand)
           brandAdded = true
         }
@@ -690,8 +789,9 @@ export class ClassEmitter {
         initContext.bytecode.emitU16(0)
       }
 
-      if (field.node.initializer) {
-        emitExpression(field.node.initializer, initContext)
+      const initializer = field.initializer ?? field.node?.initializer
+      if (initializer) {
+        emitExpression(initializer, initContext)
       } else {
         initContext.bytecode.emitOp(Opcode.OP_undefined)
       }

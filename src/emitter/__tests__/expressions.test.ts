@@ -66,6 +66,15 @@ test('emitter: string literal uses atom table', () => {
   ]))
 })
 
+test('emitter: numeric string literal uses constant pool', () => {
+  const atoms = new AtomTable()
+  const bytes = compileExpression('"123456";', atoms)
+  assert.deepEqual(Array.from(bytes), withLineInfo([
+    Opcode.OP_push_const,
+    0, 0, 0, 0,
+  ]))
+})
+
 test('emitter: boolean and null literals', () => {
   const trueBytes = compileExpression('true;')
   const falseBytes = compileExpression('false;')
@@ -307,24 +316,30 @@ test('emitter: template expression emits concat', () => {
   const bytes = compileExpression('`hi ${x}!`;', atoms)
   const hi = atoms.getOrAdd('hi ')
   const bang = atoms.getOrAdd('!')
+  const concat = atoms.getOrAdd('concat')
   assert.deepEqual(Array.from(bytes), withLineInfo([
     Opcode.OP_push_atom_value,
     hi & 0xff,
     (hi >>> 8) & 0xff,
     (hi >>> 16) & 0xff,
     (hi >>> 24) & 0xff,
+    Opcode.OP_get_field2,
+    concat & 0xff,
+    (concat >>> 8) & 0xff,
+    (concat >>> 16) & 0xff,
+    (concat >>> 24) & 0xff,
     Opcode.OP_get_var,
     x & 0xff,
     (x >>> 8) & 0xff,
     (x >>> 16) & 0xff,
     (x >>> 24) & 0xff,
-    Opcode.OP_add,
     Opcode.OP_push_atom_value,
     bang & 0xff,
     (bang >>> 8) & 0xff,
     (bang >>> 16) & 0xff,
     (bang >>> 24) & 0xff,
-    Opcode.OP_add,
+    Opcode.OP_call_method,
+    2, 0,
   ]))
 })
 

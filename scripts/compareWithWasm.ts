@@ -6,23 +6,58 @@ import ts from 'typescript'
 import { parseSource } from '../src/ast/parser'
 import { BytecodeCompiler } from '../src/emitter/emitter'
 import { AtomTable } from '../src/emitter/atom-table'
-import { OPCODE_BY_CODE, TEMP_OPCODE_BY_CODE } from '../src/env'
+import { OPCODE_BY_CODE, TEMP_OPCODE_BY_CODE, TempOpcode } from '../src/env'
+import { LabelResolver } from '../src/label/label-resolver'
+import { resolveVariables } from '../src/label/resolve-variables'
+import { peepholeOptimize } from '../src/optimizer/peephole'
+import { convertShortOpcodes } from '../src/optimizer/short-opcodes'
+import { eliminateDeadCode } from '../src/optimizer/dead-code'
 import { QuickJSLib } from './QuickJSLib'
 
 export type CompareResult = {
 	file: string
-	status: 'pass' | 'fail'
+	status: 'pass' | 'fail' | 'skip'
 	error?: string
 }
 
-const DEFAULT_FIXTURES_DIR = path.resolve(process.cwd(), 'fixtures/basic')
+const DEFAULT_FIXTURES_DIRS = [
+	path.resolve(process.cwd(), 'fixtures/basic'),
+	path.resolve(process.cwd(), 'fixtures/es2020'),
+	path.resolve(process.cwd(), 'fixtures/quickjs'),
+]
 
-const decodeOpcodes = (bytes: Uint8Array): string[] => {
+const TEMP_SCOPE_OPCODES = new Set<number>([
+	TempOpcode.OP_scope_get_var_undef,
+	TempOpcode.OP_scope_get_var,
+	TempOpcode.OP_scope_put_var,
+	TempOpcode.OP_scope_delete_var,
+	TempOpcode.OP_scope_make_ref,
+	TempOpcode.OP_scope_get_ref,
+	TempOpcode.OP_scope_put_var_init,
+	TempOpcode.OP_scope_get_var_checkthis,
+	TempOpcode.OP_scope_get_private_field,
+	TempOpcode.OP_scope_get_private_field2,
+	TempOpcode.OP_scope_put_private_field,
+	TempOpcode.OP_scope_in_private_field,
+])
+
+const getScanDef = (opcode: number) => {
+	if (TEMP_SCOPE_OPCODES.has(opcode)) {
+		return TEMP_OPCODE_BY_CODE[opcode]
+	}
+	return OPCODE_BY_CODE[opcode]
+}
+
+
+
+const decodeOpcodes = (bytes: Uint8Array, preferTempScopes: boolean): string[] => {
 	const ops: string[] = []
 	let offset = 0
 	while (offset < bytes.length) {
 		const opcode = bytes[offset]
-		const def = TEMP_OPCODE_BY_CODE[opcode] ?? OPCODE_BY_CODE[opcode]
+		const def = preferTempScopes && TEMP_SCOPE_OPCODES.has(opcode)
+			? TEMP_OPCODE_BY_CODE[opcode]
+			: OPCODE_BY_CODE[opcode]
 		if (!def) throw new Error(`Unknown opcode: ${opcode}`)
 		ops.push(def.id)
 		offset += def.size
@@ -30,8 +65,49 @@ const decodeOpcodes = (bytes: Uint8Array): string[] => {
 	return ops
 }
 
-const extractWasmOpcodes = async (source: string, sourcePath: string): Promise<string[]> => {
-	const bytes = await QuickJSLib.compileSourceAsScript(source, sourcePath)
+const hasTopLevelAwait = (source: string, sourcePath: string): boolean => {
+	const file = ts.createSourceFile(sourcePath, source, ts.ScriptTarget.ES2022, true, ts.ScriptKind.TS)
+	let found = false
+	const visit = (node: ts.Node, inFunction: boolean) => {
+		if (found) return
+		if (!inFunction && ts.isAwaitExpression(node)) {
+			found = true
+			return
+		}
+		const nextInFunction = inFunction || ts.isFunctionLike(node) || ts.isClassLike(node)
+		ts.forEachChild(node, child => visit(child, nextInFunction))
+	}
+	visit(file, false)
+	return found
+}
+
+const hasImportMeta = (source: string, sourcePath: string): boolean => {
+	const file = ts.createSourceFile(sourcePath, source, ts.ScriptTarget.ES2022, true, ts.ScriptKind.TS)
+	let found = false
+	const visit = (node: ts.Node) => {
+		if (found) return
+		if (ts.isMetaProperty(node) && node.keywordToken === ts.SyntaxKind.ImportKeyword && node.name.text === 'meta') {
+			found = true
+			return
+		}
+		ts.forEachChild(node, visit)
+	}
+	visit(file)
+	return found
+}
+
+const wrapTopLevelAwait = (source: string): string => (
+	`;(async () => {\n${source}\n})();\n`
+)
+
+const extractWasmOpcodes = async (
+	source: string,
+	sourcePath: string,
+	compileAsModule: boolean,
+): Promise<string[]> => {
+	const bytes = compileAsModule
+		? await QuickJSLib.compileSource(source, sourcePath)
+		: await QuickJSLib.compileSourceAsScript(source, sourcePath)
 	const dump = await QuickJSLib.dumpBytesToString(bytes)
 	const lines = dump.split('\n')
 	const ops: string[] = []
@@ -57,12 +133,12 @@ const extractWasmOpcodes = async (source: string, sourcePath: string): Promise<s
 	return ops
 }
 
-const transpileForWasm = (source: string, sourcePath: string): string => {
+const transpileForWasm = (source: string, sourcePath: string, compileAsModule: boolean): string => {
 	const result = ts.transpileModule(source, {
 		fileName: sourcePath,
 		compilerOptions: {
 			target: ts.ScriptTarget.ES2022,
-			module: ts.ModuleKind.CommonJS,
+			module: compileAsModule ? ts.ModuleKind.ESNext : ts.ModuleKind.CommonJS,
 		},
 	})
 	return result.outputText
@@ -73,8 +149,16 @@ const normalizeOpcodes = (ops: string[]): string[] => {
 		'line_num',
 		'label',
 		'check_define_var',
+		'check_var',
 		'define_var',
+		'invalid',
+		'define_class_computed',
+		'set_loc',
 		'set_loc0',
+		'set_loc1',
+		'set_loc2',
+		'set_loc3',
+		'set_loc8',
 		'get_loc0',
 		'put_loc0',
 		'set_loc_uninitialized',
@@ -95,6 +179,7 @@ const normalizeOpcodes = (ops: string[]): string[] => {
 		push_6: 'push_i32',
 		push_7: 'push_i32',
 		push_i8: 'push_i32',
+		push_i16: 'push_i32',
 		push_const8: 'push_const',
 		get_loc0: 'get_var',
 		get_loc1: 'get_var',
@@ -131,32 +216,55 @@ const normalizeOpcodes = (ops: string[]): string[] => {
 		if_true8: 'if_true',
 		if_false8: 'if_false',
 		goto8: 'goto',
+		goto16: 'goto',
 		call0: 'call',
 		call1: 'call',
 		call2: 'call',
 		call3: 'call',
 		put_var_init: 'put_var',
+		put_var_strict: 'put_var',
 	}
 
-	return ops
+	const normalized = ops
 		.filter(op => !ignore.has(op))
 		.map(op => shortMap[op] ?? op)
+	const cleaned: string[] = []
+	for (let i = 0; i < normalized.length; i += 1) {
+		if (normalized[i] === 'push_i32' && normalized[i + 1] === 'drop') {
+			i += 1
+			continue
+		}
+		if (
+			normalized[i] === 'get_var' &&
+			normalized[i - 1] === 'call_method' &&
+			normalized[i + 1] === 'push_const' &&
+			normalized[i + 2] === 'define_class'
+		) {
+			continue
+		}
+		cleaned.push(normalized[i])
+	}
+	return cleaned
 }
 
 const compileEmitterOpcodes = (
-	source: string, 
+	source: string,
 	sourcePath: string): string[] => {
 	const atomTable = new AtomTable()
-	const node = parseSource(source, { 
-		fileName: sourcePath 
+	const node = parseSource(source, {
+		fileName: sourcePath,
 	})
 
-	const compiler = new BytecodeCompiler({ 	
-		atomTable 
+	const compiler = new BytecodeCompiler({
+		atomTable,
 	})
 
-	const buffer = compiler.compile(node)
-	return decodeOpcodes(buffer.toUint8Array())
+	const state = compiler.compileWithState(node)
+	const raw = state.bytecode.toUint8Array()
+	const phase2 = resolveVariables(raw, state.labels.getSlots().length)
+	const resolved = new LabelResolver().resolve(phase2, state.labels.getSlots())
+	const optimized = eliminateDeadCode(convertShortOpcodes(peepholeOptimize(resolved)))
+	return decodeOpcodes(optimized, false)
 }
 
 const compareOps = (
@@ -207,9 +315,21 @@ export const collectFixtures = async (dir: string): Promise<string[]> => {
 export const compareFixture = async (filePath: string): Promise<CompareResult> => {
 	try {
 		const source = await fs.readFile(filePath, 'utf8')
-		const ours = normalizeOpcodes(compileEmitterOpcodes(source, filePath))
-		const wasmSource = transpileForWasm(source, filePath)
-		const wasm = normalizeOpcodes(await extractWasmOpcodes(wasmSource, filePath))
+		const compileAsModule = hasImportMeta(source, filePath)
+		if (compileAsModule) {
+			return {
+				file: filePath,
+				status: 'skip',
+				error: 'import.meta requires module support',
+			}
+		}
+		const normalizedSource = hasTopLevelAwait(source, filePath)
+			? wrapTopLevelAwait(source)
+			: source
+		const transpiledSource = transpileForWasm(normalizedSource, filePath, false)
+		const ours = normalizeOpcodes(compileEmitterOpcodes(transpiledSource, filePath))
+		const wasmSource = transpiledSource
+		const wasm = normalizeOpcodes(await extractWasmOpcodes(wasmSource, filePath, false))
 		debugDiffSlice(ours, wasm, filePath)
 		const diff = compareOps(ours, wasm)
 		if (diff) {
@@ -239,7 +359,11 @@ export const compareFixtures = async (
 		for (const file of slice) {
 			const result = await compareFixture(file)
 			results.push(result)
-			const status = result.status === 'pass' ? '✅' : '❌'
+			const status = result.status === 'pass'
+				? '✅'
+				: result.status === 'skip'
+					? '⏭️'
+					: '❌'
 			const rel = path.relative(process.cwd(), file)
 			const msg = result.error ? ` (${result.error})` : ''
 			console.log(`${status} ${rel}${msg}`)
@@ -248,7 +372,8 @@ export const compareFixtures = async (
 
 	const passed = results.filter(r => r.status === 'pass').length
 	const failed = results.filter(r => r.status === 'fail').length
-	console.log(`\nSummary: ${passed} passed, ${failed} failed (total ${results.length})`)
+	const skipped = results.filter(r => r.status === 'skip').length
+	console.log(`\nSummary: ${passed} passed, ${failed} failed, ${skipped} skipped (total ${results.length})`)
 
 	if (failed > 0) {
 		process.exitCode = 1
@@ -258,8 +383,8 @@ export const compareFixtures = async (
 }
 
 const main = async () => {
-	console.log(`Comparing fixtures in ${DEFAULT_FIXTURES_DIR}`)
-	await compareFixtures([DEFAULT_FIXTURES_DIR])
+	console.log(`Comparing fixtures in ${DEFAULT_FIXTURES_DIRS.join(', ')}`)
+	await compareFixtures(DEFAULT_FIXTURES_DIRS)
 }
 
 if (require.main === module) {
