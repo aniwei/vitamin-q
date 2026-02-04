@@ -634,11 +634,21 @@ export class StatementEmitter {
       context.labels.emitGoto(Opcode.OP_goto, entry.continueLabel)
       return
     }
-    const loop = this.currentLoop()
+    const loop = this.findContinueLoop()
     if (!loop || loop.continueLabel === undefined) {
       throw new Error('continue 必须位于循环语句内部')
     }
     context.labels.emitGoto(Opcode.OP_goto, loop.continueLabel)
+  }
+
+  private findContinueLoop() {
+    for (let i = this.loopStack.length - 1; i >= 0; i -= 1) {
+      const loop = this.loopStack[i]
+      if (loop?.continueLabel !== undefined) {
+        return loop
+      }
+    }
+    return undefined
   }
 
   private emitForInOfTarget(
@@ -685,6 +695,34 @@ export class StatementEmitter {
       const atom = context.getAtom(initializer.text)
       context.bytecode.emitOp(Opcode.OP_put_var)
       context.bytecode.emitAtom(atom)
+      return
+    }
+
+    if (ts.isPropertyAccessExpression(initializer)) {
+      if (ts.isPrivateIdentifier(initializer.name)) {
+        throw new Error(`未支持的 for-in/of 赋值目标: ${ts.SyntaxKind.PrivateIdentifier}`)
+      }
+      if (initializer.expression.kind === ts.SyntaxKind.SuperKeyword) {
+        throw new Error('for-in/of 赋值目标不支持 super 属性访问')
+      }
+      emitExpression(initializer.expression, context)
+      context.bytecode.emitOp(Opcode.OP_swap)
+      context.bytecode.emitOp(Opcode.OP_insert2)
+      context.bytecode.emitOp(Opcode.OP_put_field)
+      context.bytecode.emitAtom(context.getAtom(initializer.name.text))
+      context.bytecode.emitOp(Opcode.OP_drop)
+      return
+    }
+
+    if (ts.isElementAccessExpression(initializer)) {
+      if (initializer.expression.kind === ts.SyntaxKind.SuperKeyword) {
+        throw new Error('for-in/of 赋值目标不支持 super 元素访问')
+      }
+      emitExpression(initializer.expression, context)
+      emitExpression(initializer.argumentExpression, context)
+      context.bytecode.emitOp(Opcode.OP_insert3)
+      context.bytecode.emitOp(Opcode.OP_put_array_el)
+      context.bytecode.emitOp(Opcode.OP_drop)
       return
     }
 

@@ -249,6 +249,9 @@ export class FunctionEmitter {
       if (current.kind === ts.SyntaxKind.ThisKeyword) {
         usage.usesThis = true
       }
+      if (current.kind === ts.SyntaxKind.SuperKeyword) {
+        usage.usesThis = true
+      }
       if (ts.isMetaProperty(current)) {
         if (current.keywordToken === ts.SyntaxKind.NewKeyword && current.name.text === 'target') {
           usage.usesNewTarget = true

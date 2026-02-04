@@ -898,7 +898,8 @@ export class ExpressionEmitter {
 
     if (ts.isPropertyAccessExpression(target)) {
       if (target.expression.kind === ts.SyntaxKind.SuperKeyword) {
-        throw new Error('delete super.* 暂不支持')
+        this.emitDeleteSuperProperty(target.name.text, context)
+        return
       }
       this.emitExpression(target.expression, context)
       emitStringLiteral(context, target.name.text)
@@ -908,7 +909,8 @@ export class ExpressionEmitter {
 
     if (ts.isElementAccessExpression(target)) {
       if (target.expression.kind === ts.SyntaxKind.SuperKeyword) {
-        throw new Error('delete super[] 暂不支持')
+        this.emitDeleteSuperElement(target.argumentExpression, context)
+        return
       }
       this.emitExpression(target.expression, context)
       this.emitExpression(target.argumentExpression, context)
@@ -917,6 +919,28 @@ export class ExpressionEmitter {
     }
 
     throw new Error(`未支持 delete 操作数: ${ts.SyntaxKind[target.kind]}`)
+  }
+
+  private emitDeleteSuperProperty(name: string, context: EmitterContext) {
+    this.emitExpression(ts.factory.createThis(), context)
+    context.bytecode.emitOp(Opcode.OP_special_object)
+    context.bytecode.emitU8(OPSpecialObjectEnum.OP_SPECIAL_OBJECT_HOME_OBJECT)
+    context.bytecode.emitOp(Opcode.OP_get_super)
+    emitStringLiteral(context, name)
+    context.bytecode.emitOp(Opcode.OP_throw_error)
+    context.bytecode.emitAtom(JS_ATOM_NULL)
+    context.bytecode.emitU8(3)
+  }
+
+  private emitDeleteSuperElement(expression: ts.Expression, context: EmitterContext) {
+    this.emitExpression(ts.factory.createThis(), context)
+    context.bytecode.emitOp(Opcode.OP_special_object)
+    context.bytecode.emitU8(OPSpecialObjectEnum.OP_SPECIAL_OBJECT_HOME_OBJECT)
+    context.bytecode.emitOp(Opcode.OP_get_super)
+    this.emitExpression(expression, context)
+    context.bytecode.emitOp(Opcode.OP_throw_error)
+    context.bytecode.emitAtom(JS_ATOM_NULL)
+    context.bytecode.emitU8(3)
   }
 
   /**

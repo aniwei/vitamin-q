@@ -411,6 +411,48 @@ export class DestructuringEmitter {
     context.labels.emitLabel(endLabel)
   }
 
+  private emitObjectAssignmentFromValue(
+    pattern: ts.ObjectLiteralExpression,
+    context: EmitterContext,
+    emitExpression: ExpressionEmitterFn,
+  ) {
+    context.bytecode.emitOp(Opcode.OP_dup)
+    context.bytecode.emitOp(Opcode.OP_to_object)
+
+    for (const prop of pattern.properties) {
+      const entry = this.getObjectAssignmentEntry(prop)
+      const isTargetPropertyAccess = ts.isPropertyAccessExpression(entry.target)
+        && !ts.isPrivateIdentifier(entry.target.name)
+
+      if (isTargetPropertyAccess && !entry.isComputed) {
+        const propAtom = this.getObjectPropertyAtom(entry.propName, context)
+        const targetAtom = context.getAtom(entry.target.name.text)
+        context.bytecode.emitOp(Opcode.OP_dup)
+        emitExpression(entry.target.expression, context)
+        context.bytecode.emitOp(Opcode.OP_swap)
+        context.bytecode.emitOp(Opcode.OP_get_field)
+        context.bytecode.emitAtom(propAtom)
+        context.bytecode.emitOp(Opcode.OP_put_field)
+        context.bytecode.emitAtom(targetAtom)
+        continue
+      }
+
+      context.bytecode.emitOp(Opcode.OP_dup)
+      if (entry.isComputed) {
+        emitExpression(entry.propName.expression, context)
+        context.bytecode.emitOp(Opcode.OP_to_propkey)
+        context.bytecode.emitOp(Opcode.OP_get_array_el)
+      } else {
+        const propAtom = this.getObjectPropertyAtom(entry.propName, context)
+        context.bytecode.emitOp(Opcode.OP_get_field)
+        context.bytecode.emitAtom(propAtom)
+      }
+      this.emitAssignmentTargetFromValue(entry.target, context, emitExpression)
+    }
+
+    context.bytecode.emitOp(Opcode.OP_drop)
+  }
+
   private emitArrayAssignment(
     pattern: ts.ArrayLiteralExpression,
     right: ts.Expression,
@@ -427,20 +469,36 @@ export class DestructuringEmitter {
     context.bytecode.emitOp(Opcode.OP_dup)
     context.bytecode.emitOp(Opcode.OP_for_of_start)
 
-    for (const element of pattern.elements) {
+    const elements = pattern.elements
+    for (let i = 0; i < elements.length; i += 1) {
+      const element = elements[i]
       if (ts.isOmittedExpression(element)) {
+        context.bytecode.emitOp(Opcode.OP_for_of_next)
+        context.bytecode.emitU8(0)
+        context.bytecode.emitOp(Opcode.OP_drop)
+        context.bytecode.emitOp(Opcode.OP_drop)
         continue
       }
-      if (!ts.isIdentifier(element)) {
-        throw new Error('数组解构赋值仅支持简单标识符元素')
+      if (ts.isSpreadElement(element)) {
+        if (i !== elements.length - 1) {
+          throw new Error('数组解构赋值 rest 必须是最后一个元素')
+        }
+        this.emitSpreadArrayFromIterator(context, 0)
+        this.emitAssignmentTargetFromValue(element.expression, context, emitExpression)
+        continue
       }
-      const atom = context.getAtom(element.text)
-      context.bytecode.emitOp(Opcode.OP_make_var_ref)
-      context.bytecode.emitAtom(atom)
+      if (!ts.isExpression(element)) {
+        throw new Error('数组解构赋值仅支持表达式元素')
+      }
       context.bytecode.emitOp(Opcode.OP_for_of_next)
       context.bytecode.emitU8(2)
       context.bytecode.emitOp(Opcode.OP_drop)
-      context.bytecode.emitOp(Opcode.OP_put_ref_value)
+      if (ts.isBinaryExpression(element) && element.operatorToken.kind === ts.SyntaxKind.EqualsToken) {
+        this.emitDefaultInitializer(element.right, context, emitExpression)
+        this.emitAssignmentTargetFromValue(element.left, context, emitExpression)
+      } else {
+        this.emitAssignmentTargetFromValue(element, context, emitExpression)
+      }
     }
 
     context.bytecode.emitOp(Opcode.OP_iterator_close)
@@ -451,6 +509,49 @@ export class DestructuringEmitter {
     context.labels.emitGoto(Opcode.OP_goto, assignLabel)
 
     context.labels.emitLabel(endLabel)
+  }
+
+  private emitArrayAssignmentFromValue(
+    pattern: ts.ArrayLiteralExpression,
+    context: EmitterContext,
+    emitExpression: ExpressionEmitterFn,
+  ) {
+    context.bytecode.emitOp(Opcode.OP_dup)
+    context.bytecode.emitOp(Opcode.OP_for_of_start)
+
+    const elements = pattern.elements
+    for (let i = 0; i < elements.length; i += 1) {
+      const element = elements[i]
+      if (ts.isOmittedExpression(element)) {
+        context.bytecode.emitOp(Opcode.OP_for_of_next)
+        context.bytecode.emitU8(0)
+        context.bytecode.emitOp(Opcode.OP_drop)
+        context.bytecode.emitOp(Opcode.OP_drop)
+        continue
+      }
+      if (ts.isSpreadElement(element)) {
+        if (i !== elements.length - 1) {
+          throw new Error('数组解构赋值 rest 必须是最后一个元素')
+        }
+        this.emitSpreadArrayFromIterator(context, 0)
+        this.emitAssignmentTargetFromValue(element.expression, context, emitExpression)
+        continue
+      }
+      if (!ts.isExpression(element)) {
+        throw new Error('数组解构赋值仅支持表达式元素')
+      }
+      context.bytecode.emitOp(Opcode.OP_for_of_next)
+      context.bytecode.emitU8(2)
+      context.bytecode.emitOp(Opcode.OP_drop)
+      if (ts.isBinaryExpression(element) && element.operatorToken.kind === ts.SyntaxKind.EqualsToken) {
+        this.emitDefaultInitializer(element.right, context, emitExpression)
+        this.emitAssignmentTargetFromValue(element.left, context, emitExpression)
+      } else {
+        this.emitAssignmentTargetFromValue(element, context, emitExpression)
+      }
+    }
+
+    context.bytecode.emitOp(Opcode.OP_iterator_close)
   }
 
   private emitObjectBindingElement(
@@ -549,6 +650,28 @@ export class DestructuringEmitter {
       context.bytecode.emitOp(Opcode.OP_put_field)
       context.bytecode.emitAtom(context.getAtom(target.name.text))
       context.bytecode.emitOp(Opcode.OP_drop)
+      return
+    }
+
+    if (ts.isElementAccessExpression(target)) {
+      if (target.expression.kind === ts.SyntaxKind.SuperKeyword) {
+        throw new Error('数组解构赋值不支持 super 元素访问目标')
+      }
+      emitExpression(target.expression, context)
+      emitExpression(target.argumentExpression, context)
+      context.bytecode.emitOp(Opcode.OP_insert3)
+      context.bytecode.emitOp(Opcode.OP_put_array_el)
+      context.bytecode.emitOp(Opcode.OP_drop)
+      return
+    }
+
+    if (ts.isObjectLiteralExpression(target)) {
+      this.emitObjectAssignmentFromValue(target, context, emitExpression)
+      return
+    }
+
+    if (ts.isArrayLiteralExpression(target)) {
+      this.emitArrayAssignmentFromValue(target, context, emitExpression)
       return
     }
 
