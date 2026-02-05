@@ -15,7 +15,10 @@
     "test:alignment:update": "ALIGNMENT_UPDATE=1 tsx src/test/alignment-test.ts",
     "test:fixtures": "tsx src/test/fixtures-integration.ts",
     "test:perf": "tsx src/test/perf-test.ts",
-    "test:coverage": "c8 --reporter=text --reporter=lcov tsx --test src/**/__tests__/*.test.ts"
+    "test:coverage": "c8 --reporter=text --reporter=lcov tsx --test src/**/__tests__/*.test.ts",
+    "compare:wasm": "tsx scripts/compareWithWasm.ts",
+    "compare:wasm:debug": "tsx scripts/compareWithWasmDebug.ts",
+    "run:fixtures:wasm": "tsx scripts/runFixturesWithWasm.ts"
   },
   "devDependencies": {
     "@types/node": "^20.19.13",
