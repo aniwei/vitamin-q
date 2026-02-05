@@ -41,6 +41,17 @@ const TEMP_SCOPE_OPCODES = new Set<number>([
 	TempOpcode.OP_scope_in_private_field,
 ])
 
+const OPCODE_BY_ID = (() => {
+	const map = new Map<string, { size: number }>()
+	for (const def of Object.values(OPCODE_BY_CODE)) {
+		map.set(def.id, def)
+	}
+	for (const def of Object.values(TEMP_OPCODE_BY_CODE)) {
+		map.set(def.id, def)
+	}
+	return map
+})()
+
 const getScanDef = (opcode: number) => {
 	if (TEMP_SCOPE_OPCODES.has(opcode)) {
 		return TEMP_OPCODE_BY_CODE[opcode]
@@ -105,29 +116,37 @@ const extractWasmOpcodes = async (
 	sourcePath: string,
 	compileAsModule: boolean,
 ): Promise<string[]> => {
-	const bytes = compileAsModule
-		? await QuickJSLib.compileSource(source, sourcePath)
-		: await QuickJSLib.compileSourceAsScript(source, sourcePath)
-	const dump = await QuickJSLib.dumpBytesToString(bytes)
+	const { result: dump } = await QuickJSLib.withCapturedOutput(async () => {
+		const bytes = compileAsModule
+			? await QuickJSLib.compileSource(source, sourcePath)
+			: await QuickJSLib.compileSourceAsScript(source, sourcePath)
+		return QuickJSLib.dumpBytesToString(bytes)
+	})
 	const lines = dump.split('\n')
 	const ops: string[] = []
 	let inOpcodes = false
+	let opcodeBytes = -1
 
 	for (const line of lines) {
 		if (!inOpcodes) {
-			if (/opcodes \(\d+ bytes\):/.test(line)) {
+			const headerMatch = line.match(/opcodes \((\d+) bytes\):/)
+			if (headerMatch) {
 				inOpcodes = true
+				opcodeBytes = Number(headerMatch[1])
 			}
 			continue
 		}
 
-		const match = line.match(/^\s*\d+\s+([a-z0-9_]+)/i)
+		const match = line.match(/^\s*(\d+)\s+([a-z0-9_]+)/i)
 		if (match) {
-			ops.push(match[1])
-			continue
+			const offset = Number(match[1])
+			const opcode = match[2]
+			ops.push(opcode)
+			const def = OPCODE_BY_ID.get(opcode)
+			if (opcodeBytes > -1 && def && offset + def.size >= opcodeBytes) {
+				break
+			}
 		}
-
-		if (line.trim() === '' && ops.length > 0) break
 	}
 
 	return ops

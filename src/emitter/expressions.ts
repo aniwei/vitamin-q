@@ -1415,6 +1415,9 @@ export class ExpressionEmitter {
         }
         context.bytecode.emitOp(vd?.isLexical ? Opcode.OP_put_loc_check : Opcode.OP_put_loc)
         context.bytecode.emitU16(localIdx)
+        if (!preserveResult && !isPrefix) {
+          context.bytecode.emitOp(Opcode.OP_drop)
+        }
         return
       }
     }
@@ -1429,6 +1432,9 @@ export class ExpressionEmitter {
       }
       context.bytecode.emitOp(Opcode.OP_put_arg)
       context.bytecode.emitU16(argIndex)
+      if (!preserveResult && !isPrefix) {
+        context.bytecode.emitOp(Opcode.OP_drop)
+      }
       return
     }
 
@@ -1445,6 +1451,9 @@ export class ExpressionEmitter {
       }
       context.bytecode.emitOp(Opcode.OP_put_var_strict)
       context.bytecode.emitAtom(atom)
+      if (!preserveResult && !isPrefix) {
+        context.bytecode.emitOp(Opcode.OP_drop)
+      }
       return
     }
     if (preserveResult && isPrefix) {
@@ -1452,6 +1461,9 @@ export class ExpressionEmitter {
     }
     context.bytecode.emitOp(Opcode.OP_put_var)
     context.bytecode.emitAtom(atom)
+    if (!preserveResult && !isPrefix) {
+      context.bytecode.emitOp(Opcode.OP_drop)
+    }
   }
 
   private getBinaryOpcode(kind: ts.SyntaxKind): Opcode | null {

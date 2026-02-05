@@ -48,11 +48,6 @@ export class StatementEmitter {
       return
     }
 
-    if (ts.isPrefixUnaryExpression(expression) && expression.operator === ts.SyntaxKind.ExclamationToken) {
-      this.emitJumpIfTrue(expression.operand, context, emitExpression, falseLabel)
-      return
-    }
-
     if (ts.isBinaryExpression(expression)) {
       const opKind = expression.operatorToken.kind
       if (
@@ -150,11 +145,6 @@ export class StatementEmitter {
   ) {
     if (ts.isParenthesizedExpression(expression)) {
       this.emitJumpIfTrue(expression.expression, context, emitExpression, trueLabel)
-      return
-    }
-
-    if (ts.isPrefixUnaryExpression(expression) && expression.operator === ts.SyntaxKind.ExclamationToken) {
-      this.emitJumpIfFalse(expression.operand, context, emitExpression, trueLabel)
       return
     }
 

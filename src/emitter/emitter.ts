@@ -476,19 +476,6 @@ export class BytecodeCompiler {
       const stmt = node as ts.ExpressionStatement
       context.emitSourcePos(stmt)
       const expr = stmt.expression
-      if (this.options.expressionStatementDrop && context.inStrict) {
-        if (ts.isBinaryExpression(expr) && this.isStatementAssignmentOperator(expr.operatorToken.kind)) {
-          this.expressionEmitter.emitAssignmentExpression(expr, context, false)
-          return
-        }
-        if (
-          (ts.isPrefixUnaryExpression(expr) || ts.isPostfixUnaryExpression(expr)) &&
-          (expr.operator === ts.SyntaxKind.PlusPlusToken || expr.operator === ts.SyntaxKind.MinusMinusToken)
-        ) {
-          this.expressionEmitter.emitUpdateExpressionAsStatement(expr, context)
-          return
-        }
-      }
       this.dispatcher.dispatch(expr, context)
       if (
         this.options.expressionStatementDrop &&
@@ -609,17 +596,6 @@ export class BytecodeCompiler {
 
     this.dispatcher.registerStatement(ts.SyntaxKind.ForStatement, (node, context) => {
       const emitExpressionAsStatement = (expr: ts.Expression, ctx: EmitterContext) => {
-        if (ts.isBinaryExpression(expr) && this.isStatementAssignmentOperator(expr.operatorToken.kind)) {
-          this.expressionEmitter.emitAssignmentExpression(expr, ctx, false)
-          return
-        }
-        if (
-          (ts.isPrefixUnaryExpression(expr) || ts.isPostfixUnaryExpression(expr)) &&
-          (expr.operator === ts.SyntaxKind.PlusPlusToken || expr.operator === ts.SyntaxKind.MinusMinusToken)
-        ) {
-          this.expressionEmitter.emitUpdateExpressionAsStatement(expr, ctx)
-          return
-        }
         this.expressionEmitter.emitExpression(expr, ctx)
         ctx.bytecode.emitOp(Opcode.OP_drop)
       }

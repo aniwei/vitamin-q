@@ -23,6 +23,41 @@ export const peepholeOptimize = (bytecode: Uint8Array): Uint8Array => {
 	const out: number[] = []
 	for (let i = 0; i < bytecode.length; i += 1) {
 		const opcode = bytecode[i]
+		if (opcode === Opcode.OP_typeof_is_undefined || opcode === Opcode.OP_typeof_is_function) {
+			const size0 = getSize(opcode)
+			const pos1 = i + size0
+			if (pos1 < bytecode.length && bytecode[pos1] === Opcode.OP_lnot) {
+				const size1 = getSize(Opcode.OP_lnot)
+				const pos2 = pos1 + size1
+				if (pos2 < bytecode.length) {
+					const op2 = bytecode[pos2]
+					if (op2 === Opcode.OP_if_false || op2 === Opcode.OP_if_false8) {
+						const mapped = op2 === Opcode.OP_if_false ? Opcode.OP_if_true : Opcode.OP_if_true8
+						emitRaw(out, bytecode, i, size0)
+						out.push(mapped)
+						emitRaw(out, bytecode, pos2 + 1, getSize(op2) - 1)
+						i = pos2 + getSize(op2) - 1
+						continue
+					}
+				}
+			}
+		}
+		if (opcode === Opcode.OP_insert2) {
+			const size0 = getSize(opcode)
+			const pos1 = i + size0
+			if (pos1 < bytecode.length) {
+				const op1 = bytecode[pos1]
+				if (op1 === Opcode.OP_put_field || op1 === Opcode.OP_put_var_strict) {
+					const size1 = getSize(op1)
+					const pos2 = pos1 + size1
+					if (pos2 < bytecode.length && bytecode[pos2] === Opcode.OP_drop) {
+						emitRaw(out, bytecode, pos1, size1)
+						i = pos2
+						continue
+					}
+				}
+			}
+		}
 		if (opcode === Opcode.OP_put_loc || opcode === Opcode.OP_put_arg || opcode === Opcode.OP_put_var_ref) {
 			const idx = readU16(bytecode, i + 1)
 			const nextPos = i + getSize(opcode)
