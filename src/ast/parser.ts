@@ -5,6 +5,7 @@ export interface ParseSourceOptions {
   languageVersion?: ts.ScriptTarget
   scriptKind?: ts.ScriptKind
   setParentNodes?: boolean
+  setExternalModuleIndicator?: (file: ts.SourceFile) => void
 }
 
 /**
@@ -34,7 +35,18 @@ export const parseSource = (source: string, options: ParseSourceOptions = {}): t
     languageVersion = ts.ScriptTarget.ES2020,
     scriptKind = inferScriptKind(fileName),
     setParentNodes = true,
+    setExternalModuleIndicator,
   } = options
+
+  if (setExternalModuleIndicator) {
+    return ts.createSourceFile(
+      fileName,
+      source,
+      { languageVersion, setExternalModuleIndicator },
+      setParentNodes,
+      scriptKind,
+    )
+  }
 
   return ts.createSourceFile(fileName, source, languageVersion, setParentNodes, scriptKind)
 }

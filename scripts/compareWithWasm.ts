@@ -107,6 +107,12 @@ const hasImportMeta = (source: string, sourcePath: string): boolean => {
 	return found
 }
 
+const rewriteImportMetaForScript = (source: string): string => {
+	if (!source.includes('import.meta')) return source
+	const header = 'const __import_meta__ = { url: undefined };\n'
+	return header + source.replace(/\bimport\.meta\b/g, '__import_meta__')
+}
+
 const wrapTopLevelAwait = (source: string): string => (
 	`;(async () => {\n${source}\n})();\n`
 )
@@ -268,10 +274,15 @@ const normalizeOpcodes = (ops: string[]): string[] => {
 
 const compileEmitterOpcodes = (
 	source: string,
-	sourcePath: string): string[] => {
+	sourcePath: string,
+	compileAsModule: boolean): string[] => {
 	const atomTable = new AtomTable()
 	const node = parseSource(source, {
 		fileName: sourcePath,
+		languageVersion: ts.ScriptTarget.ES2022,
+		setExternalModuleIndicator: compileAsModule ? (file) => {
+			file.externalModuleIndicator ??= file
+		} : undefined,
 	})
 
 	const compiler = new BytecodeCompiler({
@@ -334,19 +345,13 @@ export const collectFixtures = async (dir: string): Promise<string[]> => {
 export const compareFixture = async (filePath: string): Promise<CompareResult> => {
 	try {
 		const source = await fs.readFile(filePath, 'utf8')
-		const compileAsModule = hasImportMeta(source, filePath)
-		if (compileAsModule) {
-			return {
-				file: filePath,
-				status: 'skip',
-				error: 'import.meta requires module support',
-			}
-		}
-		const normalizedSource = hasTopLevelAwait(source, filePath)
-			? wrapTopLevelAwait(source)
-			: source
+		const hasMeta = hasImportMeta(source, filePath)
+		const scriptSource = hasMeta ? rewriteImportMetaForScript(source) : source
+		const normalizedSource = hasTopLevelAwait(scriptSource, filePath)
+			? wrapTopLevelAwait(scriptSource)
+			: scriptSource
 		const transpiledSource = transpileForWasm(normalizedSource, filePath, false)
-		const ours = normalizeOpcodes(compileEmitterOpcodes(transpiledSource, filePath))
+		const ours = normalizeOpcodes(compileEmitterOpcodes(transpiledSource, filePath, false))
 		const wasmSource = transpiledSource
 		const wasm = normalizeOpcodes(await extractWasmOpcodes(wasmSource, filePath, false))
 		debugDiffSlice(ours, wasm, filePath)
