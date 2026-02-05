@@ -141,6 +141,7 @@ export interface EmitterContextOptions {
   inArrow?: boolean
   inAsync?: boolean
   inGenerator?: boolean
+  inStrict?: boolean
   privateBindings?: Map<string, { index: number; kind: 'field' | 'method' | 'accessor' }>
 }
 
@@ -163,6 +164,7 @@ export class EmitterContext {
   readonly inArrow: boolean
   readonly inAsync: boolean
   readonly inGenerator: boolean
+  readonly inStrict: boolean
   readonly privateBindings?: Map<string, { index: number; kind: 'field' | 'method' | 'accessor' }>
   private liveCode = true
   private lineColCache
@@ -182,6 +184,7 @@ export class EmitterContext {
     this.inArrow = options.inArrow ?? false
     this.inAsync = options.inAsync ?? false
     this.inGenerator = options.inGenerator ?? false
+    this.inStrict = options.inStrict ?? false
     this.privateBindings = options.privateBindings
     this.bytecode = new BytecodeEmitter({
       bytecode: options.bytecode,
@@ -342,6 +345,7 @@ export interface BytecodeCompilerOptions {
   constantPool?: ConstantPoolManager
   bytecode?: BytecodeBuffer
   expressionStatementDrop?: boolean
+  strict?: boolean
 }
 
 export interface BytecodeCompilerState {
@@ -387,13 +391,25 @@ export class BytecodeCompiler {
   }
 
   compileWithState(sourceFile: ts.SourceFile): BytecodeCompilerState {
+    const isModule = ts.isExternalModule(sourceFile)
+    const hasUseStrict = this.hasUseStrictDirective(sourceFile)
+    const inStrict = (this.options.strict ?? hasUseStrict) || isModule
     const context = new EmitterContext({
       sourceFile,
       atomTable: this.options.atomTable,
       inlineCache: this.options.inlineCache,
       constantPool: this.options.constantPool,
       bytecode: this.options.bytecode,
+      inStrict,
     })
+    const hasTopLevelThis = this.hasTopLevelThis(sourceFile)
+    if (!context.inFunction && !isModule && hasTopLevelThis) {
+      const thisIdx = context.allocateTempLocal()
+      context.bytecode.emitOp(Opcode.OP_push_this)
+      context.bytecode.emitOp(Opcode.OP_put_loc)
+      context.bytecode.emitU16(thisIdx)
+      context.setSpecialVar('this', thisIdx)
+    }
 
     this.compileStatements(sourceFile.statements, context)
     return {
@@ -403,6 +419,16 @@ export class BytecodeCompiler {
       inlineCache: context.inlineCache,
       constantPool: context.constantPool,
     }
+  }
+
+  private hasUseStrictDirective(sourceFile: ts.SourceFile): boolean {
+    for (const stmt of sourceFile.statements) {
+      if (!ts.isExpressionStatement(stmt)) return false
+      const expr = stmt.expression
+      if (!ts.isStringLiteral(expr)) return false
+      if (expr.text === 'use strict') return true
+    }
+    return false
   }
 
   compileStatements(statements: readonly ts.Statement[], context: EmitterContext) {
@@ -449,12 +475,26 @@ export class BytecodeCompiler {
     this.dispatcher.registerStatement(ts.SyntaxKind.ExpressionStatement, (node, context) => {
       const stmt = node as ts.ExpressionStatement
       context.emitSourcePos(stmt)
-      this.dispatcher.dispatch(stmt.expression, context)
+      const expr = stmt.expression
+      if (this.options.expressionStatementDrop && context.inStrict) {
+        if (ts.isBinaryExpression(expr) && this.isStatementAssignmentOperator(expr.operatorToken.kind)) {
+          this.expressionEmitter.emitAssignmentExpression(expr, context, false)
+          return
+        }
+        if (
+          (ts.isPrefixUnaryExpression(expr) || ts.isPostfixUnaryExpression(expr)) &&
+          (expr.operator === ts.SyntaxKind.PlusPlusToken || expr.operator === ts.SyntaxKind.MinusMinusToken)
+        ) {
+          this.expressionEmitter.emitUpdateExpressionAsStatement(expr, context)
+          return
+        }
+      }
+      this.dispatcher.dispatch(expr, context)
       if (
         this.options.expressionStatementDrop &&
         !(
-          ts.isYieldExpression(stmt.expression) &&
-          stmt.expression.asteriskToken &&
+          ts.isYieldExpression(expr) &&
+          expr.asteriskToken &&
           context.inGenerator
         )
       ) {
@@ -568,11 +608,27 @@ export class BytecodeCompiler {
     })
 
     this.dispatcher.registerStatement(ts.SyntaxKind.ForStatement, (node, context) => {
+      const emitExpressionAsStatement = (expr: ts.Expression, ctx: EmitterContext) => {
+        if (ts.isBinaryExpression(expr) && this.isStatementAssignmentOperator(expr.operatorToken.kind)) {
+          this.expressionEmitter.emitAssignmentExpression(expr, ctx, false)
+          return
+        }
+        if (
+          (ts.isPrefixUnaryExpression(expr) || ts.isPostfixUnaryExpression(expr)) &&
+          (expr.operator === ts.SyntaxKind.PlusPlusToken || expr.operator === ts.SyntaxKind.MinusMinusToken)
+        ) {
+          this.expressionEmitter.emitUpdateExpressionAsStatement(expr, ctx)
+          return
+        }
+        this.expressionEmitter.emitExpression(expr, ctx)
+        ctx.bytecode.emitOp(Opcode.OP_drop)
+      }
       this.statementEmitter.emitForStatement(
         node as ts.ForStatement,
         context,
         (expr, ctx) => this.expressionEmitter.emitExpression(expr, ctx),
         (stmt, ctx) => this.dispatcher.dispatch(stmt, ctx),
+        emitExpressionAsStatement,
       )
     })
 
@@ -678,6 +734,42 @@ export class BytecodeCompiler {
       this.dispatcher.registerExpression(kind, (node, context) => {
         this.expressionEmitter.emitExpression(node as ts.Expression, context)
       })
+    }
+  }
+
+  private hasTopLevelThis(sourceFile: ts.SourceFile): boolean {
+    let found = false
+    const visit = (node: ts.Node, inFunction: boolean) => {
+      if (found) return
+      if (!inFunction && node.kind === ts.SyntaxKind.ThisKeyword) {
+        found = true
+        return
+      }
+      const nextInFunction = inFunction || ts.isFunctionLike(node) || ts.isClassLike(node)
+      ts.forEachChild(node, child => visit(child, nextInFunction))
+    }
+    visit(sourceFile, false)
+    return found
+  }
+
+  private isStatementAssignmentOperator(kind: ts.SyntaxKind): boolean {
+    switch (kind) {
+      case ts.SyntaxKind.EqualsToken:
+      case ts.SyntaxKind.PlusEqualsToken:
+      case ts.SyntaxKind.MinusEqualsToken:
+      case ts.SyntaxKind.AsteriskEqualsToken:
+      case ts.SyntaxKind.SlashEqualsToken:
+      case ts.SyntaxKind.PercentEqualsToken:
+      case ts.SyntaxKind.AsteriskAsteriskEqualsToken:
+      case ts.SyntaxKind.LessThanLessThanEqualsToken:
+      case ts.SyntaxKind.GreaterThanGreaterThanEqualsToken:
+      case ts.SyntaxKind.GreaterThanGreaterThanGreaterThanEqualsToken:
+      case ts.SyntaxKind.AmpersandEqualsToken:
+      case ts.SyntaxKind.BarEqualsToken:
+      case ts.SyntaxKind.CaretEqualsToken:
+        return true
+      default:
+        return false
     }
   }
 

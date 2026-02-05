@@ -38,6 +38,8 @@ export const convertShortOpcodes = (bytecode: Uint8Array): Uint8Array => {
 						Opcode.OP_push_7,
 					]
 					out.push(mapping[value])
+				} else if (value === -1) {
+					out.push(Opcode.OP_push_minus1)
 				} else if (value >= -128 && value <= 127) {
 					out.push(Opcode.OP_push_i8, value & 0xff)
 				} else if (value >= -32768 && value <= 32767) {

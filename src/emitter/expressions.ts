@@ -138,6 +138,36 @@ export class ExpressionEmitter {
     }
   }
 
+  emitAssignmentExpression(node: ts.BinaryExpression, context: EmitterContext, preserveResult = true) {
+    this.assignmentEmitter.emitAssignment(node, context, this.emitExpression.bind(this), preserveResult)
+  }
+
+  emitUpdateExpressionAsStatement(
+    node: ts.PrefixUnaryExpression | ts.PostfixUnaryExpression,
+    context: EmitterContext,
+  ) {
+    if (ts.isPrefixUnaryExpression(node)) {
+      if (node.operator === ts.SyntaxKind.PlusPlusToken) {
+        this.emitUpdateExpression(node.operand, context, true, true, false)
+        return
+      }
+      if (node.operator === ts.SyntaxKind.MinusMinusToken) {
+        this.emitUpdateExpression(node.operand, context, true, false, false)
+        return
+      }
+      throw new Error(`未支持的一元运算符: ${ts.SyntaxKind[node.operator]}`)
+    }
+    if (node.operator === ts.SyntaxKind.PlusPlusToken) {
+      this.emitUpdateExpression(node.operand, context, false, true, false)
+      return
+    }
+    if (node.operator === ts.SyntaxKind.MinusMinusToken) {
+      this.emitUpdateExpression(node.operand, context, false, false, false)
+      return
+    }
+    throw new Error(`未支持的后缀一元运算符: ${ts.SyntaxKind[node.operator]}`)
+  }
+
   /**
    * @source QuickJS/src/core/parser.c:4154-4165
    * @see js_parse_expr_paren
@@ -1054,6 +1084,16 @@ export class ExpressionEmitter {
         context.bytecode.emitOp(Opcode.OP_lnot)
         return
       case ts.SyntaxKind.MinusToken:
+        if (ts.isNumericLiteral(node.operand)) {
+          const value = -Number(node.operand.text)
+          if (isInt32(value)) {
+            context.bytecode.emitOp(Opcode.OP_push_i32)
+            context.bytecode.emitU32(value >>> 0)
+          } else {
+            emitPushConst(context, value)
+          }
+          return
+        }
         if (ts.isBigIntLiteral(node.operand)) {
           const value = -BigInt(node.operand.text.replace(/n$/, ''))
           if (value >= -2147483648n && value <= 2147483647n) {
@@ -1110,11 +1150,12 @@ export class ExpressionEmitter {
       const isUndefinedString = (expr: ts.Expression) =>
         ts.isStringLiteral(expr) && expr.text === 'undefined'
       const emitTypeofTarget = (expr: ts.Expression) => {
-        if (ts.isIdentifier(expr)) {
-          this.emitTypeofIdentifier(expr, context)
+        const target = ts.isParenthesizedExpression(expr) ? expr.expression : expr
+        if (ts.isIdentifier(target)) {
+          this.emitTypeofIdentifier(target, context)
           return
         }
-        this.emitExpression(expr, context)
+        this.emitExpression(target, context)
       }
       const negate =
         opKind === ts.SyntaxKind.ExclamationEqualsToken ||
@@ -1183,8 +1224,18 @@ export class ExpressionEmitter {
     }
 
     if (opKind === ts.SyntaxKind.CommaToken) {
-      this.emitExpression(node.left, context)
-      context.bytecode.emitOp(Opcode.OP_drop)
+      const left = node.left
+      if (ts.isBinaryExpression(left) && this.isAssignmentOperator(left.operatorToken.kind)) {
+        this.assignmentEmitter.emitAssignment(left, context, this.emitExpression.bind(this), false)
+      } else if (
+        (ts.isPrefixUnaryExpression(left) || ts.isPostfixUnaryExpression(left)) &&
+        (left.operator === ts.SyntaxKind.PlusPlusToken || left.operator === ts.SyntaxKind.MinusMinusToken)
+      ) {
+        this.emitUpdateExpressionAsStatement(left, context)
+      } else {
+        this.emitExpression(left, context)
+        context.bytecode.emitOp(Opcode.OP_drop)
+      }
       this.emitExpression(node.right, context)
       return
     }
@@ -1203,6 +1254,18 @@ export class ExpressionEmitter {
    * @see js_parse_cond_expr
    */
   private emitConditionalExpression(node: ts.ConditionalExpression, context: EmitterContext) {
+    if (node.condition.kind === ts.SyntaxKind.TrueKeyword) {
+      this.emitExpression(node.whenTrue, context)
+      const endLabel = context.labels.emitGoto(Opcode.OP_goto, -1)
+      context.labels.emitLabel(endLabel)
+      return
+    }
+    if (node.condition.kind === ts.SyntaxKind.FalseKeyword) {
+      this.emitExpression(node.whenFalse, context)
+      const endLabel = context.labels.emitGoto(Opcode.OP_goto, -1)
+      context.labels.emitLabel(endLabel)
+      return
+    }
     this.emitExpression(node.condition, context)
     const falseLabel = context.labels.emitGoto(Opcode.OP_if_false, -1)
     this.emitExpression(node.whenTrue, context)
@@ -1268,9 +1331,10 @@ export class ExpressionEmitter {
     context: EmitterContext,
     isPrefix: boolean,
     isInc: boolean,
+    preserveResult = true,
   ) {
     if (ts.isIdentifier(operand)) {
-      this.emitUpdateIdentifier(operand, context, isPrefix, isInc)
+      this.emitUpdateIdentifier(operand, context, isPrefix, isInc, preserveResult)
       return
     }
     if (ts.isPropertyAccessExpression(operand)) {
@@ -1287,10 +1351,12 @@ export class ExpressionEmitter {
         context.bytecode.emitU16(binding.index)
         context.bytecode.emitOp(Opcode.OP_get_private_field)
         context.bytecode.emitOp(isPrefix ? (isInc ? Opcode.OP_inc : Opcode.OP_dec) : (isInc ? Opcode.OP_post_inc : Opcode.OP_post_dec))
-        if (isPrefix) {
+        if (preserveResult && isPrefix) {
           context.bytecode.emitOp(Opcode.OP_dup)
         }
-        context.bytecode.emitOp(Opcode.OP_insert2)
+        if (preserveResult) {
+          context.bytecode.emitOp(Opcode.OP_insert2)
+        }
         context.bytecode.emitOp(Opcode.OP_get_var_ref)
         context.bytecode.emitU16(binding.index)
         context.bytecode.emitOp(Opcode.OP_put_private_field)
@@ -1301,10 +1367,12 @@ export class ExpressionEmitter {
       context.bytecode.emitOp(Opcode.OP_get_field2)
       context.bytecode.emitAtom(atom)
       context.bytecode.emitOp(isPrefix ? (isInc ? Opcode.OP_inc : Opcode.OP_dec) : (isInc ? Opcode.OP_post_inc : Opcode.OP_post_dec))
-      if (isPrefix) {
+      if (preserveResult && isPrefix) {
         context.bytecode.emitOp(Opcode.OP_dup)
       }
-      context.bytecode.emitOp(Opcode.OP_insert2)
+      if (preserveResult) {
+        context.bytecode.emitOp(Opcode.OP_insert2)
+      }
       context.bytecode.emitOp(Opcode.OP_put_field)
       context.bytecode.emitAtom(atom)
       return
@@ -1314,10 +1382,12 @@ export class ExpressionEmitter {
       this.emitExpression(operand.argumentExpression, context)
       context.bytecode.emitOp(Opcode.OP_get_array_el3)
       context.bytecode.emitOp(isPrefix ? (isInc ? Opcode.OP_inc : Opcode.OP_dec) : (isInc ? Opcode.OP_post_inc : Opcode.OP_post_dec))
-      if (isPrefix) {
+      if (preserveResult && isPrefix) {
         context.bytecode.emitOp(Opcode.OP_dup)
       }
-      context.bytecode.emitOp(Opcode.OP_insert3)
+      if (preserveResult) {
+        context.bytecode.emitOp(Opcode.OP_insert3)
+      }
       context.bytecode.emitOp(Opcode.OP_put_array_el)
       return
     }
@@ -1329,6 +1399,7 @@ export class ExpressionEmitter {
     context: EmitterContext,
     isPrefix: boolean,
     isInc: boolean,
+    preserveResult: boolean,
   ) {
     const atom = context.getAtom(node.text)
     const scopeLevel = context.scopes.scopeLevel
@@ -1339,7 +1410,7 @@ export class ExpressionEmitter {
         context.bytecode.emitOp(vd?.isLexical ? Opcode.OP_get_loc_check : Opcode.OP_get_loc)
         context.bytecode.emitU16(localIdx)
         context.bytecode.emitOp(isPrefix ? (isInc ? Opcode.OP_inc : Opcode.OP_dec) : (isInc ? Opcode.OP_post_inc : Opcode.OP_post_dec))
-        if (isPrefix) {
+        if (preserveResult && isPrefix) {
           context.bytecode.emitOp(Opcode.OP_dup)
         }
         context.bytecode.emitOp(vd?.isLexical ? Opcode.OP_put_loc_check : Opcode.OP_put_loc)
@@ -1353,7 +1424,7 @@ export class ExpressionEmitter {
       context.bytecode.emitOp(Opcode.OP_get_arg)
       context.bytecode.emitU16(argIndex)
       context.bytecode.emitOp(isPrefix ? (isInc ? Opcode.OP_inc : Opcode.OP_dec) : (isInc ? Opcode.OP_post_inc : Opcode.OP_post_dec))
-      if (isPrefix) {
+      if (preserveResult && isPrefix) {
         context.bytecode.emitOp(Opcode.OP_dup)
       }
       context.bytecode.emitOp(Opcode.OP_put_arg)
@@ -1361,10 +1432,22 @@ export class ExpressionEmitter {
       return
     }
 
+    if (context.inStrict) {
+      context.bytecode.emitOp(Opcode.OP_check_var)
+      context.bytecode.emitAtom(atom)
+    }
     context.bytecode.emitOp(Opcode.OP_get_var)
     context.bytecode.emitAtom(atom)
     context.bytecode.emitOp(isPrefix ? (isInc ? Opcode.OP_inc : Opcode.OP_dec) : (isInc ? Opcode.OP_post_inc : Opcode.OP_post_dec))
-    if (isPrefix) {
+    if (context.inStrict) {
+      if (preserveResult) {
+        context.bytecode.emitOp(isPrefix ? Opcode.OP_insert2 : Opcode.OP_perm3)
+      }
+      context.bytecode.emitOp(Opcode.OP_put_var_strict)
+      context.bytecode.emitAtom(atom)
+      return
+    }
+    if (preserveResult && isPrefix) {
       context.bytecode.emitOp(Opcode.OP_dup)
     }
     context.bytecode.emitOp(Opcode.OP_put_var)

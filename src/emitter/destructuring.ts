@@ -389,6 +389,21 @@ export class DestructuringEmitter {
       }
 
       context.bytecode.emitOp(Opcode.OP_dup)
+      if (ts.isIdentifier(entry.target)) {
+        this.emitAssignmentRef(entry.target, context)
+        context.bytecode.emitOp(Opcode.OP_rot3l)
+        if (entry.isComputed) {
+          emitExpression(entry.propName.expression, context)
+          context.bytecode.emitOp(Opcode.OP_to_propkey)
+          context.bytecode.emitOp(Opcode.OP_get_array_el)
+        } else {
+          const propAtom = this.getObjectPropertyAtom(entry.propName, context)
+          context.bytecode.emitOp(Opcode.OP_get_field)
+          context.bytecode.emitAtom(propAtom)
+        }
+        context.bytecode.emitOp(Opcode.OP_put_ref_value)
+        continue
+      }
       if (entry.isComputed) {
         emitExpression(entry.propName.expression, context)
         context.bytecode.emitOp(Opcode.OP_to_propkey)
@@ -438,6 +453,21 @@ export class DestructuringEmitter {
       }
 
       context.bytecode.emitOp(Opcode.OP_dup)
+      if (ts.isIdentifier(entry.target)) {
+        this.emitAssignmentRef(entry.target, context)
+        context.bytecode.emitOp(Opcode.OP_rot3l)
+        if (entry.isComputed) {
+          emitExpression(entry.propName.expression, context)
+          context.bytecode.emitOp(Opcode.OP_to_propkey)
+          context.bytecode.emitOp(Opcode.OP_get_array_el)
+        } else {
+          const propAtom = this.getObjectPropertyAtom(entry.propName, context)
+          context.bytecode.emitOp(Opcode.OP_get_field)
+          context.bytecode.emitAtom(propAtom)
+        }
+        context.bytecode.emitOp(Opcode.OP_put_ref_value)
+        continue
+      }
       if (entry.isComputed) {
         emitExpression(entry.propName.expression, context)
         context.bytecode.emitOp(Opcode.OP_to_propkey)
@@ -490,15 +520,30 @@ export class DestructuringEmitter {
       if (!ts.isExpression(element)) {
         throw new Error('数组解构赋值仅支持表达式元素')
       }
+
+      const assignment = ts.isBinaryExpression(element) && element.operatorToken.kind === ts.SyntaxKind.EqualsToken
+        ? { target: element.left, initializer: element.right }
+        : { target: element, initializer: undefined }
+
+      if (ts.isIdentifier(assignment.target)) {
+        this.emitAssignmentRef(assignment.target, context)
+        context.bytecode.emitOp(Opcode.OP_for_of_next)
+        context.bytecode.emitU8(2)
+        context.bytecode.emitOp(Opcode.OP_drop)
+        if (assignment.initializer) {
+          this.emitDefaultInitializer(assignment.initializer, context, emitExpression)
+        }
+        context.bytecode.emitOp(Opcode.OP_put_ref_value)
+        continue
+      }
+
       context.bytecode.emitOp(Opcode.OP_for_of_next)
       context.bytecode.emitU8(2)
       context.bytecode.emitOp(Opcode.OP_drop)
-      if (ts.isBinaryExpression(element) && element.operatorToken.kind === ts.SyntaxKind.EqualsToken) {
-        this.emitDefaultInitializer(element.right, context, emitExpression)
-        this.emitAssignmentTargetFromValue(element.left, context, emitExpression)
-      } else {
-        this.emitAssignmentTargetFromValue(element, context, emitExpression)
+      if (assignment.initializer) {
+        this.emitDefaultInitializer(assignment.initializer, context, emitExpression)
       }
+      this.emitAssignmentTargetFromValue(assignment.target, context, emitExpression)
     }
 
     context.bytecode.emitOp(Opcode.OP_iterator_close)
@@ -540,15 +585,30 @@ export class DestructuringEmitter {
       if (!ts.isExpression(element)) {
         throw new Error('数组解构赋值仅支持表达式元素')
       }
+
+      const assignment = ts.isBinaryExpression(element) && element.operatorToken.kind === ts.SyntaxKind.EqualsToken
+        ? { target: element.left, initializer: element.right }
+        : { target: element, initializer: undefined }
+
+      if (ts.isIdentifier(assignment.target)) {
+        this.emitAssignmentRef(assignment.target, context)
+        context.bytecode.emitOp(Opcode.OP_for_of_next)
+        context.bytecode.emitU8(2)
+        context.bytecode.emitOp(Opcode.OP_drop)
+        if (assignment.initializer) {
+          this.emitDefaultInitializer(assignment.initializer, context, emitExpression)
+        }
+        context.bytecode.emitOp(Opcode.OP_put_ref_value)
+        continue
+      }
+
       context.bytecode.emitOp(Opcode.OP_for_of_next)
       context.bytecode.emitU8(2)
       context.bytecode.emitOp(Opcode.OP_drop)
-      if (ts.isBinaryExpression(element) && element.operatorToken.kind === ts.SyntaxKind.EqualsToken) {
-        this.emitDefaultInitializer(element.right, context, emitExpression)
-        this.emitAssignmentTargetFromValue(element.left, context, emitExpression)
-      } else {
-        this.emitAssignmentTargetFromValue(element, context, emitExpression)
+      if (assignment.initializer) {
+        this.emitDefaultInitializer(assignment.initializer, context, emitExpression)
       }
+      this.emitAssignmentTargetFromValue(assignment.target, context, emitExpression)
     }
 
     context.bytecode.emitOp(Opcode.OP_iterator_close)
@@ -676,6 +736,31 @@ export class DestructuringEmitter {
     }
 
     throw new Error('对象解构赋值仅支持标识符或属性访问目标')
+  }
+
+  private emitAssignmentRef(target: ts.Identifier, context: EmitterContext) {
+    const atom = context.getAtom(target.text)
+    const scopeLevel = context.scopes.scopeLevel
+    if (scopeLevel >= 0) {
+      const localIdx = context.scopes.findVarInScope(atom, scopeLevel)
+      if (localIdx >= 0) {
+        context.bytecode.emitOp(Opcode.OP_make_loc_ref)
+        context.bytecode.emitAtom(atom)
+        context.bytecode.emitU16(localIdx)
+        return
+      }
+    }
+
+    const argIndex = context.getArgIndex(target.text)
+    if (argIndex >= 0) {
+      context.bytecode.emitOp(Opcode.OP_make_arg_ref)
+      context.bytecode.emitAtom(atom)
+      context.bytecode.emitU16(argIndex)
+      return
+    }
+
+    context.bytecode.emitOp(Opcode.OP_make_var_ref)
+    context.bytecode.emitAtom(atom)
   }
 
   private getObjectPropertyAtom(propName: ts.PropertyName, context: EmitterContext): number {

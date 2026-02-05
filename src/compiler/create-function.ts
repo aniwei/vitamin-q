@@ -16,6 +16,7 @@ export interface CreateFunctionOptions {
   stripDebug?: boolean
   stripSource?: boolean
   useShortOpcodes?: boolean
+  strict?: boolean
 }
 
 /**
@@ -28,6 +29,7 @@ export const createFunction = (options: CreateFunctionOptions): JSFunctionByteco
   const compiler = new BytecodeCompiler({
     atomTable: options.atomTable,
     expressionStatementDrop: true,
+    strict: options.strict,
   })
 
   const state = compiler.compileWithState(options.sourceFile)

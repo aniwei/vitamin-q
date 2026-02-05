@@ -44,6 +44,7 @@ export const compile = (source: string, options: CompileOptions = {}): CompileRe
     stripDebug: options.stripDebug,
     stripSource: options.stripSource,
     useShortOpcodes: options.useShortOpcodes,
+    strict: options.strict,
   })
 
   return {

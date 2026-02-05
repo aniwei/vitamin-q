@@ -32,7 +32,7 @@ export class LiteralEmitter {
     const hasSpread = elements.some(element => ts.isSpreadElement(element))
     const hasHole = elements.some(element => element.kind === ts.SyntaxKind.OmittedExpression)
 
-    if (!hasSpread && !hasHole) {
+    if (!hasSpread && !hasHole && elements.length <= 32) {
       for (const element of elements) {
         emitExpression(element as ts.Expression, context)
       }
@@ -100,40 +100,33 @@ export class LiteralEmitter {
     }
 
     let prefixCount = 0
-    while (prefixCount < elements.length) {
+    while (prefixCount < elements.length && prefixCount < 32) {
       const element = elements[prefixCount]
       if (element.kind === ts.SyntaxKind.OmittedExpression) {
         break
       }
+      emitExpression(element as ts.Expression, context)
       prefixCount += 1
     }
 
-    if (prefixCount > 0) {
-      for (let i = 0; i < prefixCount; i += 1) {
-        emitExpression(elements[i] as ts.Expression, context)
-      }
-      context.bytecode.emitOp(Opcode.OP_array_from)
-      context.bytecode.emitU16(prefixCount)
-    } else {
-      context.bytecode.emitOp(Opcode.OP_array_from)
-      context.bytecode.emitU16(0)
-    }
+    context.bytecode.emitOp(Opcode.OP_array_from)
+    context.bytecode.emitU16(prefixCount)
 
-    let trailingHole = false
+    let needLength = false
     for (let i = prefixCount; i < elements.length; i += 1) {
       const element = elements[i]
       if (element.kind === ts.SyntaxKind.OmittedExpression) {
-        trailingHole = true
+        needLength = true
         continue
       }
 
-      trailingHole = false
       emitExpression(element as ts.Expression, context)
       context.bytecode.emitOp(Opcode.OP_define_field)
       context.bytecode.emitAtom(context.getAtom(String(i)))
+      needLength = false
     }
 
-    if (trailingHole) {
+    if (needLength) {
       const lengthAtom = context.getAtom('length')
       context.bytecode.emitOp(Opcode.OP_dup)
       context.bytecode.emitOp(Opcode.OP_push_i32)

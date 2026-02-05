@@ -62,7 +62,7 @@ export class FunctionEmitter {
   private destructuringEmitter = new DestructuringEmitter()
 
   emitFunctionExpression(node: ts.FunctionExpression | ts.ArrowFunction, context: EmitterContext) {
-    this.emitFunctionClosure(node, context, { setName: true })
+    this.emitFunctionClosure(node, context)
   }
 
   emitFunctionDeclaration(node: ts.FunctionDeclaration, context: EmitterContext) {
@@ -124,6 +124,8 @@ export class FunctionEmitter {
     parentContext: EmitterContext,
     options: { privateBindings?: Map<string, { index: number; kind: 'field' | 'method' | 'accessor' }> } = {},
   ): Uint8Array {
+    const hasUseStrict = this.hasUseStrictDirective(node)
+    const isStrict = parentContext.inStrict || hasUseStrict
     const bytecode = new BytecodeBuffer()
     const inlineCache = new InlineCacheManager()
     const constantPool = new ConstantPoolManager()
@@ -152,15 +154,15 @@ export class FunctionEmitter {
       inArrow: ts.isArrowFunction(node),
       inAsync: Boolean(node.modifiers?.some(mod => mod.kind === ts.SyntaxKind.AsyncKeyword)),
       inGenerator: Boolean((node as ts.FunctionDeclaration | ts.FunctionExpression).asteriskToken),
+      inStrict: isStrict,
       privateBindings: options.privateBindings,
     })
 
     context.scopes.pushScope()
     const specialUsage = this.collectSpecialVarUsage(node)
-    const hasUseStrict = this.hasUseStrictDirective(node)
     const hasSimpleParameterList = this.hasSimpleParameterList(node)
     const specialVars = this.registerSpecialVariables(node, context, argMap, specialUsage, {
-      hasUseStrict,
+      hasUseStrict: isStrict,
       hasSimpleParameterList,
     })
     this.registerParameterLocals(node, context)

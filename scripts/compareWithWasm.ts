@@ -374,6 +374,16 @@ export const compareFixtures = async (
 	const failed = results.filter(r => r.status === 'fail').length
 	const skipped = results.filter(r => r.status === 'skip').length
 	console.log(`\nSummary: ${passed} passed, ${failed} failed, ${skipped} skipped (total ${results.length})`)
+	console.log(`Overall: ${failed > 0 ? 'FAIL' : 'PASS'}`)
+	if (failed > 0) {
+		console.log('\nFailed fixtures:')
+		for (const result of results) {
+			if (result.status !== 'fail') continue
+			const rel = path.relative(process.cwd(), result.file)
+			const msg = result.error ? ` (${result.error})` : ''
+			console.log(`- ${rel}${msg}`)
+		}
+	}
 
 	if (failed > 0) {
 		process.exitCode = 1

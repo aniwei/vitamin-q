@@ -15,23 +15,41 @@ export type ExpressionEmitterFn = (node: ts.Expression, context: EmitterContext)
 export class AssignmentEmitter {
   private destructuringEmitter = new DestructuringEmitter()
 
+  private unwrapParenthesizedExpression(expr: ts.Expression): ts.Expression {
+    let current = expr
+    while (ts.isParenthesizedExpression(current)) {
+      current = current.expression
+    }
+    return current
+  }
+
+  private shouldSetName(expr: ts.Expression): boolean {
+    const target = this.unwrapParenthesizedExpression(expr)
+    return (ts.isFunctionExpression(target) && !target.name) || ts.isArrowFunction(target)
+  }
+
   /**
    * @source QuickJS/src/core/parser.c:5995-6280
    * @see js_parse_assign_expr2
    */
-  emitAssignment(node: ts.BinaryExpression, context: EmitterContext, emitExpression: ExpressionEmitterFn) {
+  emitAssignment(
+    node: ts.BinaryExpression,
+    context: EmitterContext,
+    emitExpression: ExpressionEmitterFn,
+    preserveResult = true,
+  ) {
     const opKind = node.operatorToken.kind
     switch (opKind) {
       case ts.SyntaxKind.EqualsToken:
-        return this.emitSimpleAssignment(node.left, node.right, context, emitExpression)
+        return this.emitSimpleAssignment(node.left, node.right, context, emitExpression, preserveResult)
       case ts.SyntaxKind.AmpersandAmpersandEqualsToken:
-        return this.emitLogicalAssignment(node.left, node.right, '&&', context, emitExpression)
+        return this.emitLogicalAssignment(node.left, node.right, '&&', context, emitExpression, preserveResult)
       case ts.SyntaxKind.BarBarEqualsToken:
-        return this.emitLogicalAssignment(node.left, node.right, '||', context, emitExpression)
+        return this.emitLogicalAssignment(node.left, node.right, '||', context, emitExpression, preserveResult)
       case ts.SyntaxKind.QuestionQuestionEqualsToken:
-        return this.emitLogicalAssignment(node.left, node.right, '??', context, emitExpression)
+        return this.emitLogicalAssignment(node.left, node.right, '??', context, emitExpression, preserveResult)
       default:
-        return this.emitCompoundAssignmentByOperator(opKind, node, context, emitExpression)
+        return this.emitCompoundAssignmentByOperator(opKind, node, context, emitExpression, preserveResult)
     }
   }
 
@@ -40,12 +58,13 @@ export class AssignmentEmitter {
     node: ts.BinaryExpression,
     context: EmitterContext,
     emitExpression: ExpressionEmitterFn,
+    preserveResult: boolean,
   ) {
     const compoundOpcode = this.getCompoundOpcode(opKind)
     if (!compoundOpcode) {
       throw new Error(`未支持的赋值运算符: ${ts.SyntaxKind[opKind]}`)
     }
-    this.emitCompoundAssignment(node.left, node.right, compoundOpcode, context, emitExpression)
+    this.emitCompoundAssignment(node.left, node.right, compoundOpcode, context, emitExpression, preserveResult)
   }
 
   /**
@@ -57,6 +76,7 @@ export class AssignmentEmitter {
     right: ts.Expression,
     context: EmitterContext,
     emitExpression: ExpressionEmitterFn,
+    preserveResult: boolean,
   ) {
     if (ts.isObjectLiteralExpression(left) || ts.isArrayLiteralExpression(left)) {
       this.destructuringEmitter.emitAssignmentPattern(left, right, context, emitExpression)
@@ -64,9 +84,9 @@ export class AssignmentEmitter {
     }
 
     if (ts.isIdentifier(left)) {
+      const atom = context.getAtom(left.text)
       const withIdx = context.findWithVarIndex()
       if (withIdx >= 0) {
-        const atom = context.getAtom(left.text)
         context.bytecode.emitOp(Opcode.OP_get_loc)
         context.bytecode.emitU16(withIdx)
         const refLabel = context.labels.newLabel()
@@ -78,6 +98,10 @@ export class AssignmentEmitter {
         context.bytecode.emitAtom(atom)
         context.labels.emitLabel(refLabel)
         emitExpression(right, context)
+        if (this.shouldSetName(right)) {
+          context.bytecode.emitOp(Opcode.OP_set_name)
+          context.bytecode.emitAtom(atom)
+        }
         context.bytecode.emitOp(Opcode.OP_insert3)
         context.bytecode.emitOp(Opcode.OP_put_ref_value)
         return
@@ -85,15 +109,37 @@ export class AssignmentEmitter {
       const argIndex = context.getArgIndex(left.text)
       if (argIndex >= 0) {
         emitExpression(right, context)
+        if (this.shouldSetName(right)) {
+          context.bytecode.emitOp(Opcode.OP_set_name)
+          context.bytecode.emitAtom(atom)
+        }
         context.bytecode.emitOp(Opcode.OP_dup)
         context.bytecode.emitOp(Opcode.OP_put_arg)
         context.bytecode.emitU16(argIndex)
         return
       }
+      if (context.inStrict) {
+        context.bytecode.emitOp(Opcode.OP_check_var)
+        context.bytecode.emitAtom(atom)
+      }
       emitExpression(right, context)
-      context.bytecode.emitOp(Opcode.OP_dup)
-      context.bytecode.emitOp(Opcode.OP_put_var)
-      context.bytecode.emitAtom(context.getAtom(left.text))
+      if (this.shouldSetName(right)) {
+        context.bytecode.emitOp(Opcode.OP_set_name)
+        context.bytecode.emitAtom(atom)
+      }
+      if (context.inStrict) {
+        if (preserveResult) {
+          context.bytecode.emitOp(Opcode.OP_insert2)
+        }
+        context.bytecode.emitOp(Opcode.OP_put_var_strict)
+        context.bytecode.emitAtom(atom)
+      } else {
+        if (preserveResult) {
+          context.bytecode.emitOp(Opcode.OP_dup)
+        }
+        context.bytecode.emitOp(Opcode.OP_put_var)
+        context.bytecode.emitAtom(atom)
+      }
       return
     }
 
@@ -105,7 +151,9 @@ export class AssignmentEmitter {
         }
         emitExpression(left.expression, context)
         emitExpression(right, context)
-        context.bytecode.emitOp(Opcode.OP_insert2)
+        if (preserveResult) {
+          context.bytecode.emitOp(Opcode.OP_insert2)
+        }
         context.bytecode.emitOp(Opcode.OP_get_var_ref)
         context.bytecode.emitU16(binding.index)
         context.bytecode.emitOp(Opcode.OP_put_private_field)
@@ -113,7 +161,9 @@ export class AssignmentEmitter {
       }
       emitExpression(left.expression, context)
       emitExpression(right, context)
-      context.bytecode.emitOp(Opcode.OP_insert2)
+      if (preserveResult) {
+        context.bytecode.emitOp(Opcode.OP_insert2)
+      }
       context.bytecode.emitOp(Opcode.OP_put_field)
       context.bytecode.emitAtom(context.getAtom(left.name.text))
       return
@@ -123,7 +173,9 @@ export class AssignmentEmitter {
       emitExpression(left.expression, context)
       emitExpression(left.argumentExpression, context)
       emitExpression(right, context)
-      context.bytecode.emitOp(Opcode.OP_insert3)
+      if (preserveResult) {
+        context.bytecode.emitOp(Opcode.OP_insert3)
+      }
       context.bytecode.emitOp(Opcode.OP_put_array_el)
       return
     }
@@ -141,15 +193,31 @@ export class AssignmentEmitter {
     opcode: Opcode,
     context: EmitterContext,
     emitExpression: ExpressionEmitterFn,
+    preserveResult: boolean,
   ) {
     if (ts.isIdentifier(left)) {
+      const atom = context.getAtom(left.text)
+      if (context.inStrict) {
+        context.bytecode.emitOp(Opcode.OP_check_var)
+        context.bytecode.emitAtom(atom)
+      }
       context.bytecode.emitOp(Opcode.OP_get_var)
-      context.bytecode.emitAtom(context.getAtom(left.text))
+      context.bytecode.emitAtom(atom)
       emitExpression(right, context)
       context.bytecode.emitOp(opcode)
-      context.bytecode.emitOp(Opcode.OP_dup)
-      context.bytecode.emitOp(Opcode.OP_put_var)
-      context.bytecode.emitAtom(context.getAtom(left.text))
+      if (context.inStrict) {
+        if (preserveResult) {
+          context.bytecode.emitOp(Opcode.OP_insert2)
+        }
+        context.bytecode.emitOp(Opcode.OP_put_var_strict)
+        context.bytecode.emitAtom(atom)
+      } else {
+        if (preserveResult) {
+          context.bytecode.emitOp(Opcode.OP_dup)
+        }
+        context.bytecode.emitOp(Opcode.OP_put_var)
+        context.bytecode.emitAtom(atom)
+      }
       return
     }
 
@@ -159,7 +227,9 @@ export class AssignmentEmitter {
       context.bytecode.emitAtom(context.getAtom(left.name.text))
       emitExpression(right, context)
       context.bytecode.emitOp(opcode)
-      context.bytecode.emitOp(Opcode.OP_insert2)
+      if (preserveResult) {
+        context.bytecode.emitOp(Opcode.OP_insert2)
+      }
       context.bytecode.emitOp(Opcode.OP_put_field)
       context.bytecode.emitAtom(context.getAtom(left.name.text))
       return
@@ -171,7 +241,9 @@ export class AssignmentEmitter {
       context.bytecode.emitOp(Opcode.OP_get_array_el3)
       emitExpression(right, context)
       context.bytecode.emitOp(opcode)
-      context.bytecode.emitOp(Opcode.OP_insert3)
+      if (preserveResult) {
+        context.bytecode.emitOp(Opcode.OP_insert3)
+      }
       context.bytecode.emitOp(Opcode.OP_put_array_el)
       return
     }
@@ -189,6 +261,7 @@ export class AssignmentEmitter {
     logicalKind: '&&' | '||' | '??',
     context: EmitterContext,
     emitExpression: ExpressionEmitterFn,
+    preserveResult: boolean,
   ) {
     const endLabel = context.labels.newLabel()
 
@@ -202,12 +275,17 @@ export class AssignmentEmitter {
         const skipLabel = context.labels.emitGoto(Opcode.OP_if_false, -1)
         context.bytecode.emitOp(Opcode.OP_drop)
         emitExpression(right, context)
-        context.bytecode.emitOp(Opcode.OP_dup)
+        if (preserveResult) {
+          context.bytecode.emitOp(Opcode.OP_dup)
+        }
         context.bytecode.emitOp(Opcode.OP_put_var)
         context.bytecode.emitAtom(atom)
         context.labels.emitGoto(Opcode.OP_goto, endLabel)
         context.labels.emitLabel(skipLabel)
         context.labels.emitLabel(endLabel)
+        if (!preserveResult) {
+          context.bytecode.emitOp(Opcode.OP_drop)
+        }
         return
       }
 
@@ -215,12 +293,17 @@ export class AssignmentEmitter {
         const skipLabel = context.labels.emitGoto(Opcode.OP_if_true, -1)
         context.bytecode.emitOp(Opcode.OP_drop)
         emitExpression(right, context)
-        context.bytecode.emitOp(Opcode.OP_dup)
+        if (preserveResult) {
+          context.bytecode.emitOp(Opcode.OP_dup)
+        }
         context.bytecode.emitOp(Opcode.OP_put_var)
         context.bytecode.emitAtom(atom)
         context.labels.emitGoto(Opcode.OP_goto, endLabel)
         context.labels.emitLabel(skipLabel)
         context.labels.emitLabel(endLabel)
+        if (!preserveResult) {
+          context.bytecode.emitOp(Opcode.OP_drop)
+        }
         return
       }
 
@@ -230,10 +313,15 @@ export class AssignmentEmitter {
       context.labels.emitLabel(assignLabel)
       context.bytecode.emitOp(Opcode.OP_drop)
       emitExpression(right, context)
-      context.bytecode.emitOp(Opcode.OP_dup)
+      if (preserveResult) {
+        context.bytecode.emitOp(Opcode.OP_dup)
+      }
       context.bytecode.emitOp(Opcode.OP_put_var)
       context.bytecode.emitAtom(atom)
       context.labels.emitLabel(endLabel)
+      if (!preserveResult) {
+        context.bytecode.emitOp(Opcode.OP_drop)
+      }
       return
     }
 
@@ -249,7 +337,9 @@ export class AssignmentEmitter {
         context.bytecode.emitOp(Opcode.OP_drop)
         context.bytecode.emitOp(Opcode.OP_drop)
         emitExpression(right, context)
-        context.bytecode.emitOp(Opcode.OP_insert2)
+        if (preserveResult) {
+          context.bytecode.emitOp(Opcode.OP_insert2)
+        }
         context.bytecode.emitOp(Opcode.OP_put_field)
         context.bytecode.emitAtom(atom)
         context.labels.emitGoto(Opcode.OP_goto, endLabel)
@@ -257,6 +347,9 @@ export class AssignmentEmitter {
         context.bytecode.emitOp(Opcode.OP_swap)
         context.bytecode.emitOp(Opcode.OP_drop)
         context.labels.emitLabel(endLabel)
+        if (!preserveResult) {
+          context.bytecode.emitOp(Opcode.OP_drop)
+        }
         return
       }
 
@@ -265,7 +358,9 @@ export class AssignmentEmitter {
         context.bytecode.emitOp(Opcode.OP_drop)
         context.bytecode.emitOp(Opcode.OP_drop)
         emitExpression(right, context)
-        context.bytecode.emitOp(Opcode.OP_insert2)
+        if (preserveResult) {
+          context.bytecode.emitOp(Opcode.OP_insert2)
+        }
         context.bytecode.emitOp(Opcode.OP_put_field)
         context.bytecode.emitAtom(atom)
         context.labels.emitGoto(Opcode.OP_goto, endLabel)
@@ -273,6 +368,9 @@ export class AssignmentEmitter {
         context.bytecode.emitOp(Opcode.OP_swap)
         context.bytecode.emitOp(Opcode.OP_drop)
         context.labels.emitLabel(endLabel)
+        if (!preserveResult) {
+          context.bytecode.emitOp(Opcode.OP_drop)
+        }
         return
       }
 
@@ -284,10 +382,15 @@ export class AssignmentEmitter {
       context.labels.emitLabel(assignLabel)
       context.bytecode.emitOp(Opcode.OP_drop)
       emitExpression(right, context)
-      context.bytecode.emitOp(Opcode.OP_insert2)
+      if (preserveResult) {
+        context.bytecode.emitOp(Opcode.OP_insert2)
+      }
       context.bytecode.emitOp(Opcode.OP_put_field)
       context.bytecode.emitAtom(atom)
       context.labels.emitLabel(endLabel)
+      if (!preserveResult) {
+        context.bytecode.emitOp(Opcode.OP_drop)
+      }
       return
     }
 
@@ -302,7 +405,9 @@ export class AssignmentEmitter {
         context.bytecode.emitOp(Opcode.OP_drop)
         context.bytecode.emitOp(Opcode.OP_drop)
         emitExpression(right, context)
-        context.bytecode.emitOp(Opcode.OP_insert3)
+        if (preserveResult) {
+          context.bytecode.emitOp(Opcode.OP_insert3)
+        }
         context.bytecode.emitOp(Opcode.OP_put_array_el)
         context.labels.emitGoto(Opcode.OP_goto, endLabel)
         context.labels.emitLabel(skipLabel)
@@ -310,6 +415,9 @@ export class AssignmentEmitter {
         context.bytecode.emitOp(Opcode.OP_drop)
         context.bytecode.emitOp(Opcode.OP_drop)
         context.labels.emitLabel(endLabel)
+        if (!preserveResult) {
+          context.bytecode.emitOp(Opcode.OP_drop)
+        }
         return
       }
 
@@ -318,7 +426,9 @@ export class AssignmentEmitter {
         context.bytecode.emitOp(Opcode.OP_drop)
         context.bytecode.emitOp(Opcode.OP_drop)
         emitExpression(right, context)
-        context.bytecode.emitOp(Opcode.OP_insert3)
+        if (preserveResult) {
+          context.bytecode.emitOp(Opcode.OP_insert3)
+        }
         context.bytecode.emitOp(Opcode.OP_put_array_el)
         context.labels.emitGoto(Opcode.OP_goto, endLabel)
         context.labels.emitLabel(skipLabel)
@@ -326,6 +436,9 @@ export class AssignmentEmitter {
         context.bytecode.emitOp(Opcode.OP_drop)
         context.bytecode.emitOp(Opcode.OP_drop)
         context.labels.emitLabel(endLabel)
+        if (!preserveResult) {
+          context.bytecode.emitOp(Opcode.OP_drop)
+        }
         return
       }
 
@@ -338,9 +451,14 @@ export class AssignmentEmitter {
       context.labels.emitLabel(assignLabel)
       context.bytecode.emitOp(Opcode.OP_drop)
       emitExpression(right, context)
-      context.bytecode.emitOp(Opcode.OP_insert3)
+      if (preserveResult) {
+        context.bytecode.emitOp(Opcode.OP_insert3)
+      }
       context.bytecode.emitOp(Opcode.OP_put_array_el)
       context.labels.emitLabel(endLabel)
+      if (!preserveResult) {
+        context.bytecode.emitOp(Opcode.OP_drop)
+      }
       return
     }
 

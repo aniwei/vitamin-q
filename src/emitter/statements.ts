@@ -23,6 +23,229 @@ export class StatementEmitter {
   private destructuringEmitter = new DestructuringEmitter()
   private functionEmitter = new FunctionEmitter()
   private classEmitter = new ClassEmitter()
+  
+  private unwrapParenthesizedExpression(expr: ts.Expression): ts.Expression {
+    let current = expr
+    while (ts.isParenthesizedExpression(current)) {
+      current = current.expression
+    }
+    return current
+  }
+  
+  private shouldSetName(expr: ts.Expression): boolean {
+    const target = this.unwrapParenthesizedExpression(expr)
+    return (ts.isFunctionExpression(target) && !target.name) || ts.isArrowFunction(target)
+  }
+
+  private emitJumpIfFalse(
+    expression: ts.Expression,
+    context: EmitterContext,
+    emitExpression: ExpressionEmitterFn,
+    falseLabel: number,
+  ) {
+    if (ts.isParenthesizedExpression(expression)) {
+      this.emitJumpIfFalse(expression.expression, context, emitExpression, falseLabel)
+      return
+    }
+
+    if (ts.isPrefixUnaryExpression(expression) && expression.operator === ts.SyntaxKind.ExclamationToken) {
+      this.emitJumpIfTrue(expression.operand, context, emitExpression, falseLabel)
+      return
+    }
+
+    if (ts.isBinaryExpression(expression)) {
+      const opKind = expression.operatorToken.kind
+      if (
+        opKind === ts.SyntaxKind.EqualsEqualsToken ||
+        opKind === ts.SyntaxKind.EqualsEqualsEqualsToken ||
+        opKind === ts.SyntaxKind.ExclamationEqualsToken ||
+        opKind === ts.SyntaxKind.ExclamationEqualsEqualsToken
+      ) {
+        const isUndefinedString = (expr: ts.Expression) =>
+          ts.isStringLiteral(expr) && expr.text === 'undefined'
+        const emitTypeofTarget = (expr: ts.Expression) => {
+          const target = ts.isParenthesizedExpression(expr) ? expr.expression : expr
+          if (ts.isIdentifier(target)) {
+            const atom = context.getAtom(target.text)
+            const scopeLevel = context.scopes.scopeLevel
+            if (scopeLevel >= 0) {
+              const localIdx = context.scopes.findVarInScope(atom, scopeLevel)
+              if (localIdx >= 0) {
+                const vd = context.scopes.vars[localIdx]
+                if (vd?.isLexical) {
+                  context.bytecode.emitOp(Opcode.OP_get_loc_check)
+                } else {
+                  context.bytecode.emitOp(Opcode.OP_get_loc)
+                }
+                context.bytecode.emitU16(localIdx)
+                return
+              }
+            }
+            const argIndex = context.getArgIndex(target.text)
+            if (argIndex >= 0) {
+              context.bytecode.emitOp(Opcode.OP_get_arg)
+              context.bytecode.emitU16(argIndex)
+              return
+            }
+            context.bytecode.emitOp(Opcode.OP_get_var_undef)
+            context.bytecode.emitAtom(atom)
+            return
+          }
+          emitExpression(target, context)
+        }
+        const negate =
+          opKind === ts.SyntaxKind.ExclamationEqualsToken ||
+          opKind === ts.SyntaxKind.ExclamationEqualsEqualsToken
+        if (ts.isTypeOfExpression(expression.left) && isUndefinedString(expression.right)) {
+          emitTypeofTarget(expression.left.expression)
+          context.bytecode.emitOp(Opcode.OP_typeof_is_undefined)
+          context.labels.emitGoto(negate ? Opcode.OP_if_true : Opcode.OP_if_false, falseLabel)
+          return
+        }
+        if (ts.isTypeOfExpression(expression.right) && isUndefinedString(expression.left)) {
+          emitTypeofTarget(expression.right.expression)
+          context.bytecode.emitOp(Opcode.OP_typeof_is_undefined)
+          context.labels.emitGoto(negate ? Opcode.OP_if_true : Opcode.OP_if_false, falseLabel)
+          return
+        }
+      }
+      if (opKind === ts.SyntaxKind.AmpersandAmpersandToken) {
+        this.emitJumpIfFalse(expression.left, context, emitExpression, falseLabel)
+        this.emitJumpIfFalse(expression.right, context, emitExpression, falseLabel)
+        return
+      }
+
+      if (opKind === ts.SyntaxKind.BarBarToken) {
+        const endLabel = context.labels.newLabel()
+        this.emitJumpIfTrue(expression.left, context, emitExpression, endLabel)
+        this.emitJumpIfFalse(expression.right, context, emitExpression, falseLabel)
+        context.labels.emitLabel(endLabel)
+        return
+      }
+
+      if (opKind === ts.SyntaxKind.QuestionQuestionToken) {
+        emitExpression(expression.left, context)
+        context.bytecode.emitOp(Opcode.OP_dup)
+        context.bytecode.emitOp(Opcode.OP_is_undefined_or_null)
+        const useRight = context.labels.emitGoto(Opcode.OP_if_true, -1)
+        context.labels.emitGoto(Opcode.OP_if_false, falseLabel)
+        const endLabel = context.labels.emitGoto(Opcode.OP_goto, -1)
+        context.labels.emitLabel(useRight)
+        context.bytecode.emitOp(Opcode.OP_drop)
+        this.emitJumpIfFalse(expression.right, context, emitExpression, falseLabel)
+        context.labels.emitLabel(endLabel)
+        return
+      }
+    }
+
+    emitExpression(expression, context)
+    context.labels.emitGoto(Opcode.OP_if_false, falseLabel)
+  }
+
+  private emitJumpIfTrue(
+    expression: ts.Expression,
+    context: EmitterContext,
+    emitExpression: ExpressionEmitterFn,
+    trueLabel: number,
+  ) {
+    if (ts.isParenthesizedExpression(expression)) {
+      this.emitJumpIfTrue(expression.expression, context, emitExpression, trueLabel)
+      return
+    }
+
+    if (ts.isPrefixUnaryExpression(expression) && expression.operator === ts.SyntaxKind.ExclamationToken) {
+      this.emitJumpIfFalse(expression.operand, context, emitExpression, trueLabel)
+      return
+    }
+
+    if (ts.isBinaryExpression(expression)) {
+      const opKind = expression.operatorToken.kind
+      if (
+        opKind === ts.SyntaxKind.EqualsEqualsToken ||
+        opKind === ts.SyntaxKind.EqualsEqualsEqualsToken ||
+        opKind === ts.SyntaxKind.ExclamationEqualsToken ||
+        opKind === ts.SyntaxKind.ExclamationEqualsEqualsToken
+      ) {
+        const isUndefinedString = (expr: ts.Expression) =>
+          ts.isStringLiteral(expr) && expr.text === 'undefined'
+        const emitTypeofTarget = (expr: ts.Expression) => {
+          const target = ts.isParenthesizedExpression(expr) ? expr.expression : expr
+          if (ts.isIdentifier(target)) {
+            const atom = context.getAtom(target.text)
+            const scopeLevel = context.scopes.scopeLevel
+            if (scopeLevel >= 0) {
+              const localIdx = context.scopes.findVarInScope(atom, scopeLevel)
+              if (localIdx >= 0) {
+                const vd = context.scopes.vars[localIdx]
+                if (vd?.isLexical) {
+                  context.bytecode.emitOp(Opcode.OP_get_loc_check)
+                } else {
+                  context.bytecode.emitOp(Opcode.OP_get_loc)
+                }
+                context.bytecode.emitU16(localIdx)
+                return
+              }
+            }
+            const argIndex = context.getArgIndex(target.text)
+            if (argIndex >= 0) {
+              context.bytecode.emitOp(Opcode.OP_get_arg)
+              context.bytecode.emitU16(argIndex)
+              return
+            }
+            context.bytecode.emitOp(Opcode.OP_get_var_undef)
+            context.bytecode.emitAtom(atom)
+            return
+          }
+          emitExpression(target, context)
+        }
+        const negate =
+          opKind === ts.SyntaxKind.ExclamationEqualsToken ||
+          opKind === ts.SyntaxKind.ExclamationEqualsEqualsToken
+        if (ts.isTypeOfExpression(expression.left) && isUndefinedString(expression.right)) {
+          emitTypeofTarget(expression.left.expression)
+          context.bytecode.emitOp(Opcode.OP_typeof_is_undefined)
+          context.labels.emitGoto(negate ? Opcode.OP_if_false : Opcode.OP_if_true, trueLabel)
+          return
+        }
+        if (ts.isTypeOfExpression(expression.right) && isUndefinedString(expression.left)) {
+          emitTypeofTarget(expression.right.expression)
+          context.bytecode.emitOp(Opcode.OP_typeof_is_undefined)
+          context.labels.emitGoto(negate ? Opcode.OP_if_false : Opcode.OP_if_true, trueLabel)
+          return
+        }
+      }
+      if (opKind === ts.SyntaxKind.AmpersandAmpersandToken) {
+        const endLabel = context.labels.newLabel()
+        this.emitJumpIfFalse(expression.left, context, emitExpression, endLabel)
+        this.emitJumpIfTrue(expression.right, context, emitExpression, trueLabel)
+        context.labels.emitLabel(endLabel)
+        return
+      }
+
+      if (opKind === ts.SyntaxKind.BarBarToken) {
+        this.emitJumpIfTrue(expression.left, context, emitExpression, trueLabel)
+        this.emitJumpIfTrue(expression.right, context, emitExpression, trueLabel)
+        return
+      }
+
+      if (opKind === ts.SyntaxKind.QuestionQuestionToken) {
+        emitExpression(expression.left, context)
+        context.bytecode.emitOp(Opcode.OP_dup)
+        context.bytecode.emitOp(Opcode.OP_is_undefined_or_null)
+        const useRight = context.labels.emitGoto(Opcode.OP_if_true, -1)
+        context.labels.emitGoto(Opcode.OP_if_true, trueLabel)
+        const endLabel = context.labels.emitGoto(Opcode.OP_goto, -1)
+        context.labels.emitLabel(useRight)
+        context.bytecode.emitOp(Opcode.OP_drop)
+        this.emitJumpIfTrue(expression.right, context, emitExpression, trueLabel)
+        context.labels.emitLabel(endLabel)
+        return
+      }
+    }
+
+    emitExpression(expression, context)
+    context.labels.emitGoto(Opcode.OP_if_true, trueLabel)
+  }
 
   private pushLoop(breakLabel: number, continueLabel?: number) {
     const label = this.pendingLabel
@@ -93,20 +316,42 @@ export class StatementEmitter {
 
     if (!node.elseStatement) {
       const loop = this.currentLoop()
-      if (loop && ts.isBreakStatement(node.thenStatement)) {
-        emitExpression(node.expression, context)
-        context.labels.emitGoto(Opcode.OP_if_true, loop.breakLabel)
-        return
+      const simpleThen = ts.isBlock(node.thenStatement) && node.thenStatement.statements.length === 1
+        ? node.thenStatement.statements[0]
+        : node.thenStatement
+
+      if (ts.isBreakStatement(simpleThen)) {
+        if (simpleThen.label) {
+          const entry = this.findLabel(simpleThen.label.text)
+          if (!entry) {
+            throw new Error(`未知的 break 标签: ${simpleThen.label.text}`)
+          }
+          this.emitJumpIfTrue(node.expression, context, emitExpression, entry.breakLabel)
+          return
+        }
+        if (loop) {
+          this.emitJumpIfTrue(node.expression, context, emitExpression, loop.breakLabel)
+          return
+        }
       }
-      if (loop?.continueLabel !== undefined && ts.isContinueStatement(node.thenStatement)) {
-        emitExpression(node.expression, context)
-        context.labels.emitGoto(Opcode.OP_if_true, loop.continueLabel)
-        return
+      if (ts.isContinueStatement(simpleThen)) {
+        if (simpleThen.label) {
+          const entry = this.findLabel(simpleThen.label.text)
+          if (!entry || entry.continueLabel === undefined) {
+            throw new Error(`未知的 continue 标签: ${simpleThen.label.text}`)
+          }
+          this.emitJumpIfTrue(node.expression, context, emitExpression, entry.continueLabel)
+          return
+        }
+        if (loop?.continueLabel !== undefined) {
+          this.emitJumpIfTrue(node.expression, context, emitExpression, loop.continueLabel)
+          return
+        }
       }
     }
 
-    emitExpression(node.expression, context)
-    const falseLabel = context.labels.emitGoto(Opcode.OP_if_false, -1)
+    const falseLabel = context.labels.newLabel()
+    this.emitJumpIfFalse(node.expression, context, emitExpression, falseLabel)
     emitStatement(node.thenStatement, context)
     if (node.elseStatement) {
       const endLabel = context.labels.emitGoto(Opcode.OP_goto, -1)
@@ -160,7 +405,7 @@ export class StatementEmitter {
       const atom = context.getAtom(decl.name.text)
       if (decl.initializer) {
         emitExpression(decl.initializer, context)
-        if (ts.isFunctionExpression(decl.initializer) || ts.isArrowFunction(decl.initializer)) {
+          if (this.shouldSetName(decl.initializer)) {
           context.bytecode.emitOp(Opcode.OP_set_name)
           context.bytecode.emitAtom(atom)
         }
@@ -270,16 +515,21 @@ export class StatementEmitter {
     context.bytecode.emitOp(Opcode.OP_catch)
     context.bytecode.emitU32(catchLabel)
 
-    for (const stmt of node.tryBlock.statements) {
+    const tryStatements = node.tryBlock.statements
+    const alwaysThrow = tryStatements.length === 1 && ts.isThrowStatement(tryStatements[0])
+
+    for (const stmt of tryStatements) {
       emitStatement(stmt, context)
     }
 
-    if (hasFinally && finallyLabel >= 0) {
-      context.labels.emitGoto(Opcode.OP_gosub, finallyLabel)
-    }
+    if (!alwaysThrow) {
+      if (hasFinally && finallyLabel >= 0) {
+        context.labels.emitGoto(Opcode.OP_gosub, finallyLabel)
+      }
 
-    context.bytecode.emitOp(Opcode.OP_drop)
-    context.labels.emitGoto(Opcode.OP_goto, endLabel)
+      context.bytecode.emitOp(Opcode.OP_drop)
+      context.labels.emitGoto(Opcode.OP_goto, endLabel)
+    }
 
     context.labels.emitLabel(catchLabel)
 
@@ -301,10 +551,14 @@ export class StatementEmitter {
       context.bytecode.emitOp(Opcode.OP_drop)
       if (hasFinally && finallyLabel >= 0) {
         context.labels.emitGoto(Opcode.OP_gosub, finallyLabel)
+        context.bytecode.emitOp(Opcode.OP_drop)
       }
       context.labels.emitGoto(Opcode.OP_goto, endLabel)
 
       context.labels.emitLabel(innerCatchLabel)
+      if (hasFinally && finallyLabel >= 0) {
+        context.labels.emitGoto(Opcode.OP_gosub, finallyLabel)
+      }
       context.bytecode.emitOp(Opcode.OP_throw)
     }
 
@@ -315,9 +569,22 @@ export class StatementEmitter {
 
     if (hasFinally && finallyLabel >= 0) {
       context.labels.emitLabel(finallyLabel)
+      const retIdx = 0
+      const savedRetIdx = context.allocateTempLocal()
+      context.bytecode.emitOp(Opcode.OP_get_loc)
+      context.bytecode.emitU16(retIdx)
+      context.bytecode.emitOp(Opcode.OP_put_loc)
+      context.bytecode.emitU16(savedRetIdx)
+      context.bytecode.emitOp(Opcode.OP_undefined)
+      context.bytecode.emitOp(Opcode.OP_put_loc)
+      context.bytecode.emitU16(retIdx)
       for (const stmt of node.finallyBlock?.statements ?? []) {
         emitStatement(stmt, context)
       }
+      context.bytecode.emitOp(Opcode.OP_get_loc)
+      context.bytecode.emitU16(savedRetIdx)
+      context.bytecode.emitOp(Opcode.OP_put_loc)
+      context.bytecode.emitU16(retIdx)
       context.bytecode.emitOp(Opcode.OP_ret)
     }
 
@@ -509,8 +776,9 @@ export class StatementEmitter {
     const endLabel = context.labels.newLabel()
 
     context.labels.emitLabel(startLabel)
-    emitExpression(node.expression, context)
-    context.labels.emitGoto(Opcode.OP_if_false, endLabel)
+    if (node.expression.kind !== ts.SyntaxKind.TrueKeyword) {
+      this.emitJumpIfFalse(node.expression, context, emitExpression, endLabel)
+    }
 
     this.pushLoop(endLabel, startLabel)
     emitStatement(node.statement, context)
@@ -541,8 +809,11 @@ export class StatementEmitter {
     this.popLoop()
 
     context.labels.emitLabel(continueLabel)
-    emitExpression(node.expression, context)
-    context.labels.emitGoto(Opcode.OP_if_true, startLabel)
+    if (node.expression.kind === ts.SyntaxKind.TrueKeyword) {
+      context.labels.emitGoto(Opcode.OP_goto, startLabel)
+    } else {
+      this.emitJumpIfTrue(node.expression, context, emitExpression, startLabel)
+    }
     context.labels.emitLabel(endLabel)
   }
 
@@ -555,6 +826,7 @@ export class StatementEmitter {
     context: EmitterContext,
     emitExpression: ExpressionEmitterFn,
     emitStatement: StatementEmitterFn,
+    emitExpressionAsStatement?: ExpressionEmitterFn,
   ) {
     context.emitSourcePos(node)
 
@@ -572,7 +844,12 @@ export class StatementEmitter {
           }
         }
       } else {
-        emitExpression(node.initializer, context)
+        if (emitExpressionAsStatement) {
+          emitExpressionAsStatement(node.initializer, context)
+        } else {
+          emitExpression(node.initializer, context)
+          context.bytecode.emitOp(Opcode.OP_drop)
+        }
       }
     }
 
@@ -581,9 +858,8 @@ export class StatementEmitter {
     const endLabel = context.labels.newLabel()
 
     context.labels.emitLabel(testLabel)
-    if (node.condition) {
-      emitExpression(node.condition, context)
-      context.labels.emitGoto(Opcode.OP_if_false, endLabel)
+    if (node.condition && node.condition.kind !== ts.SyntaxKind.TrueKeyword) {
+      this.emitJumpIfFalse(node.condition, context, emitExpression, endLabel)
     }
 
     this.pushLoop(endLabel, updateLabel)
@@ -592,8 +868,12 @@ export class StatementEmitter {
 
     context.labels.emitLabel(updateLabel)
     if (node.incrementor) {
-      emitExpression(node.incrementor, context)
-      context.bytecode.emitOp(Opcode.OP_drop)
+      if (emitExpressionAsStatement) {
+        emitExpressionAsStatement(node.incrementor, context)
+      } else {
+        emitExpression(node.incrementor, context)
+        context.bytecode.emitOp(Opcode.OP_drop)
+      }
     }
     context.labels.emitGoto(Opcode.OP_goto, testLabel)
     context.labels.emitLabel(endLabel)
